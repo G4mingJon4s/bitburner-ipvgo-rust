@@ -1,5 +1,3 @@
-use rand::prelude::*;
-use rand::rng;
 use std::io::stdin;
 use std::thread;
 use std::time::Duration;
@@ -15,7 +13,6 @@ use crate::board::util::*;
 use crate::io::IO;
 
 fn main() {
-    let mut rng = rng();
     let sin = stdin();
 
     loop {
@@ -49,5 +46,8 @@ fn main() {
             IO::print_result(parsed_move, &board);
             IO::press_enter_continue(&sin);
         }
+
+        println!("The game is over");
+        IO::press_enter_continue(&sin);
     }
 }

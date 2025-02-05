@@ -10,6 +10,7 @@ impl IO {
 
         let mut s = String::new();
         stdin.read_line(&mut s).map_err(|e| e.to_string())?;
+        println!("");
 
         let parts: Vec<_> = s.trim().split(";").map(|s| s.to_string()).collect();
         if parts.len() != 3 {
@@ -34,6 +35,7 @@ impl IO {
 
         let mut s = String::new();
         stdin.read_line(&mut s).map_err(|e| e.to_string())?;
+        println!("");
 
         if s.trim().to_lowercase() == "pass" {
             return Ok(Move::Pass);

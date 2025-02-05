@@ -1,7 +1,10 @@
-use std::{collections::{HashSet, LinkedList}, iter};
 use crate::board::util::*;
-use std::hash::{DefaultHasher, Hash, Hasher};
 use std::fmt::Debug;
+use std::hash::{DefaultHasher, Hash, Hasher};
+use std::{
+    collections::{HashSet, LinkedList},
+    iter,
+};
 
 pub struct Board {
     pub white: Vec<u32>,
@@ -17,7 +20,9 @@ pub struct Board {
 
 impl Debug for Board {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Board({:?},{},{},{},{})",
+        write!(
+            f,
+            "Board({:?},{},{},{},{})",
             self.turn,
             self.size,
             self.white.as_ptr() as u32,
@@ -52,9 +57,9 @@ impl Hash for Board {
 
 impl PartialEq for Board {
     fn eq(&self, other: &Self) -> bool {
-        self.white.iter().eq(other.white.iter()) &&
-        self.black.iter().eq(other.black.iter()) &&
-        self.dead.iter().eq(other.dead.iter())
+        self.white.iter().eq(other.white.iter())
+            && self.black.iter().eq(other.black.iter())
+            && self.dead.iter().eq(other.dead.iter())
     }
 
     fn ne(&self, other: &Self) -> bool {
@@ -145,7 +150,7 @@ impl Board {
         match () {
             _ if self.white[idx] & mask != 0 => Tile::White,
             _ if self.black[idx] & mask != 0 => Tile::Black,
-            _ if self.dead[idx]  & mask != 0 => Tile::Dead,
+            _ if self.dead[idx] & mask != 0 => Tile::Dead,
             _ => Tile::Free,
         }
     }
@@ -181,11 +186,15 @@ impl Board {
             (x.checked_add(1), Some(y)),
             (Some(x), y.checked_sub(1)),
             (Some(x), y.checked_add(1)),
-        ].iter().filter(|(x, y)|
-            (x.is_some() && y.is_some()) &&
-            (x.unwrap() < self.size as usize) &&
-            (y.unwrap() < self.size as usize)
-        ).map(|(x, y)| self.to_pos(x.unwrap(), y.unwrap())).collect::<Vec<_>>()
+        ]
+        .iter()
+        .filter(|(x, y)| {
+            (x.is_some() && y.is_some())
+                && (x.unwrap() < self.size as usize)
+                && (y.unwrap() < self.size as usize)
+        })
+        .map(|(x, y)| self.to_pos(x.unwrap(), y.unwrap()))
+        .collect::<Vec<_>>()
     }
 
     pub fn make_pass(&self) -> Board {
@@ -196,7 +205,10 @@ impl Board {
             _ => self.turn.next(),
         };
         new_board.turn = new_turn;
-        new_board.prev.push_front(PreviousData { board: self.get_hash(), mv: Move::Pass });
+        new_board.prev.push_front(PreviousData {
+            board: self.get_hash(),
+            mv: Move::Pass,
+        });
         new_board
     }
 
@@ -212,7 +224,7 @@ impl Board {
         new_board.turn = self.turn.next();
         new_board.prev.push_front(PreviousData {
             board: self.get_hash(),
-            mv: Move::Pos(pos)
+            mv: Move::Pos(pos),
         });
 
         let next_tile: Tile = new_board.turn.try_into()?;
@@ -246,18 +258,23 @@ impl Board {
 
     pub fn valid_moves(&self) -> impl Iterator<Item = (Move, Board)> + '_ {
         iter::once((Move::Pass, self.make_pass())).chain(
-            (0..((self.size as usize).pow(2))).filter_map(|p| {
-                match self.make_move(p) {
-                    Ok(board) => Some((Move::Pos(p), board)),
-                    Err(_) => None,
-                }
-            })
+            (0..((self.size as usize).pow(2))).filter_map(|p| match self.make_move(p) {
+                Ok(board) => Some((Move::Pos(p), board)),
+                Err(_) => None,
+            }),
         )
     }
 
     pub fn from(rep: &String, turn: Turn, komi: f32) -> Result<Self, String> {
-        let data: Vec<&str> = rep.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
-        let size: u8 = data.len().try_into().map_err(|_| "Size is too big".to_string())?;
+        let data: Vec<&str> = rep
+            .lines()
+            .map(|l| l.trim())
+            .filter(|l| !l.is_empty())
+            .collect();
+        let size: u8 = data
+            .len()
+            .try_into()
+            .map_err(|_| "Size is too big".to_string())?;
 
         if data.iter().any(|l| l.len() != size as usize) {
             return Err("Board is not a square".to_string());
@@ -276,10 +293,16 @@ impl Board {
 
     pub fn get_board_state(&self) -> String {
         let size = self.size as usize;
-        (0..size).map(|x| String::from_iter((0..size)
-            .map(|y| self.tile(self.to_pos(x, y)).into())
-            .collect::<Vec<char>>()
-            .iter()
-        )).collect::<Vec<_>>().join("\n")
+        (0..size)
+            .map(|x| {
+                String::from_iter(
+                    (0..size)
+                        .map(|y| self.tile(self.to_pos(x, y)).into())
+                        .collect::<Vec<char>>()
+                        .iter(),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 }

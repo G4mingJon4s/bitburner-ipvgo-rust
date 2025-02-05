@@ -1,4 +1,4 @@
-use crate::board::util::*;
+use crate::util::*;
 use std::fmt::Debug;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::{

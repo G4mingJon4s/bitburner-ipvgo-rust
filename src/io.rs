@@ -1,6 +1,6 @@
 use std::io::Stdin;
 
-use crate::board::{board::*, util::*};
+use crate::{board::*, util::*};
 
 pub struct IO;
 impl IO {

@@ -2,15 +2,13 @@ use std::io::stdin;
 use std::thread;
 use std::time::Duration;
 
-pub mod board {
-    pub mod board;
-    pub mod util;
-}
+pub mod board;
 pub mod io;
+pub mod util;
 
-use crate::board::board::*;
-use crate::board::util::*;
+use crate::board::*;
 use crate::io::IO;
+use crate::util::*;
 
 fn main() {
     let sin = stdin();

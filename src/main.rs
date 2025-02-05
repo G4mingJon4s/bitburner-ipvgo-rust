@@ -1,61 +1,53 @@
 use rand::prelude::*;
 use rand::rng;
-use std::fs;
-use std::io;
+use std::io::stdin;
+use std::thread;
+use std::time::Duration;
 
 pub mod board {
     pub mod board;
     pub mod util;
 }
-
-#[cfg(test)]
-mod tests;
+pub mod io;
 
 use crate::board::board::*;
 use crate::board::util::*;
+use crate::io::IO;
 
 fn main() {
     let mut rng = rng();
+    let sin = stdin();
 
-    let contents = fs::read_to_string("data/board.txt").expect("Couldn't read file");
-    let (rep, turn, komi) = extract_board_state(&contents).expect("Invalid board state");
-    let mut board = Board::from(&rep, turn, komi).expect("Could not create board from board state");
-
-    let inp = io::stdin();
-
-    while board.turn != Turn::None {
-        let valid_moves = board.valid_moves().collect::<Vec<_>>();
-        let num_valid_moves = &valid_moves.len();
-        let (mv, result_board) = valid_moves
-            .into_iter()
-            .nth(rng.random_range(0..(*num_valid_moves)))
-            .unwrap();
-
-        board = result_board;
-        println!("Made move {}", mv);
-        println!("Board:\n{}", board.get_board_state());
-
-        println!("Please input a move:");
-        let mut result = String::new();
-        if inp.read_line(&mut result).is_err() {
-            break;
+    loop {
+        let state = IO::read_state(&sin);
+        if let Err(e) = state {
+            eprintln!("Error: {}", e);
+            thread::sleep(Duration::from_millis(2000));
+            continue;
         }
 
-        let mv = extract_move(board.size, &result);
-        if let Err(e) = &mv {
-            eprintln!("Input Error: {}", e);
-            break;
-        }
+        let (rep, turn, komi) = state.unwrap();
+        let mut board = Board::from(&rep, turn, komi).expect("Board parsing error");
 
-        let new_board = match mv.unwrap() {
-            Move::Pass => Ok(board.make_pass()),
-            Move::Pos(p) => board.make_move(p),
-        };
+        while board.turn != Turn::None {
+            let mv = IO::read_move(&sin);
+            if let Err(e) = mv {
+                eprintln!("Error: {}", e);
+                thread::sleep(Duration::from_millis(2000));
+                continue;
+            }
 
-        if let Err(e) = &new_board {
-            eprintln!("Invalid move: {}", e);
-            break;
+            let parsed_move = mv.unwrap();
+            let new_board = board.make_move(parsed_move);
+            if let Err(e) = new_board {
+                eprintln!("Error: {}", e);
+                thread::sleep(Duration::from_millis(2000));
+                continue;
+            }
+
+            board = new_board.unwrap();
+            IO::print_result(parsed_move, &board);
+            IO::press_enter_continue(&sin);
         }
-        board = new_board.unwrap();
     }
 }

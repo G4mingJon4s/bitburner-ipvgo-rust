@@ -106,7 +106,7 @@ impl Chains for Board {
         }
 
         ChainData {
-            tile: tile,
+            tile,
             tiles: tiles.iter().map(|p| *p).collect::<Vec<_>>(),
             adjacent: adjacent.iter().map(|p| *p).collect::<Vec<_>>(),
             liberties: liberties.iter().map(|p| *p).collect::<Vec<_>>(),
@@ -197,7 +197,7 @@ impl Board {
         .collect::<Vec<_>>()
     }
 
-    pub fn make_pass(&self) -> Board {
+    fn pass(&self) -> Board {
         let mut new_board = self.clone();
 
         let new_turn = match self.prev.front() {
@@ -212,7 +212,16 @@ impl Board {
         new_board
     }
 
-    pub fn make_move(&self, pos: usize) -> Result<Board, String> {
+    pub fn make_move(&self, mv: Move) -> Result<Board, String> {
+        if mv == Move::Pass {
+            return Ok(self.pass());
+        }
+        let pos = match mv {
+            Move::Coords((x, y)) => self.to_pos(x, y),
+            Move::Pos(p) => p,
+            _ => panic!("Not possible"),
+        };
+
         if self.tile(pos) != Tile::Free {
             return Err("Tile is not free".to_string());
         }
@@ -257,17 +266,17 @@ impl Board {
     }
 
     pub fn valid_moves(&self) -> impl Iterator<Item = (Move, Board)> + '_ {
-        iter::once((Move::Pass, self.make_pass())).chain(
-            (0..((self.size as usize).pow(2))).filter_map(|p| match self.make_move(p) {
+        iter::once((Move::Pass, self.pass())).chain((0..((self.size as usize).pow(2))).filter_map(
+            |p| match self.make_move(Move::Pos(p)) {
                 Ok(board) => Some((Move::Pos(p), board)),
                 Err(_) => None,
-            }),
-        )
+            },
+        ))
     }
 
-    pub fn from(rep: &String, turn: Turn, komi: f32) -> Result<Self, String> {
+    pub fn from(rep: &Vec<String>, turn: Turn, komi: f32) -> Result<Self, String> {
         let data: Vec<&str> = rep
-            .lines()
+            .iter()
             .map(|l| l.trim())
             .filter(|l| !l.is_empty())
             .collect();

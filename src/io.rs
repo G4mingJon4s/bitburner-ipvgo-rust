@@ -5,7 +5,6 @@ use crate::{board::*, util::*};
 pub struct IO;
 impl IO {
     pub fn read_state(stdin: &Stdin) -> Result<(Vec<String>, Turn, f32), String> {
-        print!("{esc}[2J{esc}[1;1H", esc = 27 as char);
         println!("Please input your board state (Turn;Board:with:semicolons;Komi):");
 
         let mut s = String::new();

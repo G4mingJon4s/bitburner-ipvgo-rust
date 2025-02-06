@@ -7,6 +7,8 @@ pub mod eval;
 pub mod io;
 pub mod util;
 
+use clap::Parser;
+
 use crate::board::*;
 use crate::eval::*;
 use crate::io::IO;
@@ -14,7 +16,16 @@ use crate::util::*;
 
 const DEPTH: u8 = 4;
 
+#[derive(Parser, Debug)]
+struct Args {
+    #[arg(short, long, default_value_t = DEPTH)]
+    depth: u8,
+}
+
 fn main() {
+    let args = Args::parse();
+    let depth = args.depth;
+
     let sin = stdin();
 
     loop {
@@ -33,7 +44,7 @@ fn main() {
             let move_evaluation: Vec<_> = board
                 .valid_moves()
                 .map(|(m, b)| {
-                    let result = Evaluation::evaluate(&b, DEPTH);
+                    let result = Evaluation::evaluate(&b, depth);
                     (
                         match m {
                             Move::Pos(p) => Move::Coords(board.to_coords(p)),

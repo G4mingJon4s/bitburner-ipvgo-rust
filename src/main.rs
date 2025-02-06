@@ -1,4 +1,5 @@
 use std::io::stdin;
+use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -41,21 +42,36 @@ fn main() {
 
         while board.turn != Turn::None {
             let start = Instant::now();
-            let move_evaluation: Vec<_> = board
+            let evaluation_threads: Vec<_> = board
                 .valid_moves()
                 .map(|(m, b)| {
-                    let result = Evaluation::evaluate(&b, depth);
+                    let (tx, rx) = mpsc::channel();
+                    let handle = thread::spawn(move || {
+                        let result = Evaluation::evaluate(&b, depth);
+                        tx.send(result).expect("Recieving failed!");
+                    });
                     (
                         match m {
                             Move::Pos(p) => Move::Coords(board.to_coords(p)),
                             v => v,
                         },
-                        result,
+                        handle,
+                        rx,
                     )
                 })
                 .collect();
+
+            while !evaluation_threads.iter().any(|(_, h, _)| h.is_finished()) {
+                thread::sleep(Duration::from_millis(1));
+            }
+
             let end = Instant::now();
             let time = end - start;
+
+            let move_evaluation: Vec<_> = evaluation_threads
+                .iter()
+                .map(|(m, _, rx)| (*m, rx.recv().unwrap()))
+                .collect();
 
             IO::print_move_evalutations(move_evaluation, board.is_maximizing(), time);
 

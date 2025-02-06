@@ -1,4 +1,4 @@
-use std::io::Stdin;
+use std::{io::Stdin, time::Duration};
 
 use crate::{board::*, util::*};
 
@@ -52,6 +52,21 @@ impl IO {
         println!("Press Enter to continue...");
         let mut s = String::new();
         stdin.read_line(&mut s).unwrap();
+    }
+
+    pub fn print_move_evalutations(moves: Vec<(Move, f32)>, maximizing: bool, time: Duration) {
+        println!("Move evaluations ({} seconds):", time.as_secs());
+
+        let mut sorted: Vec<_> = moves.iter().collect();
+        sorted.sort_by(|a, b| a.1.total_cmp(&b.1));
+        if maximizing {
+            sorted.reverse();
+        }
+
+        let width = (sorted.len() as f32).log10().floor() as usize + 1;
+        for (i, (mv, eval)) in sorted.iter().enumerate() {
+            println!("{:width$}: {:12} | {:+05.1}", i, mv, eval);
+        }
     }
 
     pub fn print_result(mv: Move, board: &Board) {

@@ -1,14 +1,18 @@
 use std::io::stdin;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub mod board;
+pub mod eval;
 pub mod io;
 pub mod util;
 
 use crate::board::*;
+use crate::eval::*;
 use crate::io::IO;
 use crate::util::*;
+
+const DEPTH: u8 = 4;
 
 fn main() {
     let sin = stdin();
@@ -25,6 +29,25 @@ fn main() {
         let mut board = Board::from(&rep, turn, komi).expect("Board parsing error");
 
         while board.turn != Turn::None {
+            let start = Instant::now();
+            let move_evaluation: Vec<_> = board
+                .valid_moves()
+                .map(|(m, b)| {
+                    let result = Evaluation::evaluate(&b, DEPTH);
+                    (
+                        match m {
+                            Move::Pos(p) => Move::Coords(board.to_coords(p)),
+                            v => v,
+                        },
+                        result,
+                    )
+                })
+                .collect();
+            let end = Instant::now();
+            let time = end - start;
+
+            IO::print_move_evalutations(move_evaluation, board.is_maximizing(), time);
+
             let mv = IO::read_move(&sin);
             if let Err(e) = mv {
                 eprintln!("Error: {}", e);

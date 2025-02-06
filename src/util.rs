@@ -87,11 +87,13 @@ pub enum Move {
 
 impl Display for Move {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Move::Pass => write!(f, "Pass"),
-            Move::Coords((x, y)) => write!(f, "Move ({}, {})", x, y),
-            Move::Pos(p) => write!(f, "Move {}", *p),
-        }
+        let s = match self {
+            Move::Pass => "Pass".to_string(),
+            Move::Coords((x, y)) => format!("Move ({},{})", x, y),
+            Move::Pos(p) => format!("Move {}", p),
+        };
+
+        write!(f, "{:width$}", s, width = f.width().unwrap_or(0))
     }
 }
 

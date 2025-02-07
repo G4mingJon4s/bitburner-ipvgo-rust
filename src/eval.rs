@@ -19,40 +19,62 @@ where
     fn get_children(&self) -> impl Iterator<Item = Self>;
 }
 
+#[derive(Clone, Copy)]
+pub enum Transposition {
+    Exact(f32),
+    Lower(f32),
+    Upper(f32),
+}
+enum Class {
+    Bound,
+    Cutoff,
+    Exact,
+}
+
 pub struct TranspositionTable {
-    map: HashMap<u64, (u8, f32)>,
+    min: HashMap<u64, (u8, Transposition)>,
+    max: HashMap<u64, (u8, Transposition)>,
 }
 impl TranspositionTable {
     pub fn new() -> Self {
         Self {
-            map: HashMap::new(),
+            min: HashMap::new(),
+            max: HashMap::new(),
         }
     }
 
-    pub fn get(&self, key: &u64) -> Option<&(u8, f32)> {
-        self.map.get(key)
+    pub fn get(&self, key: &u64, max: bool) -> Option<&(u8, Transposition)> {
+        if max {
+            self.max.get(key)
+        } else {
+            self.min.get(key)
+        }
     }
 
-    pub fn get_eval(&self, key: &u64, depth: &u8) -> Option<f32> {
-        let entry = self.map.get(key);
+    pub fn get_eval(&self, key: u64, depth: u8, max: bool) -> Option<Transposition> {
+        let entry = self.get(&key, max);
         entry.map(|t| match t.0 {
-            value if value >= *depth => Some(t.1),
+            value if value >= depth => Some(t.1),
             _ => None,
         })?
     }
 
-    pub fn set(&mut self, key: u64, value: (u8, f32)) {
-        self.map.insert(key, value);
+    pub fn set(&mut self, key: u64, max: bool, value: (u8, Transposition)) {
+        if max {
+            self.max.insert(key, value);
+        } else {
+            self.min.insert(key, value);
+        }
     }
 
-    pub fn set_eval(&mut self, key: u64, value: (u8, f32)) {
-        if let Some((d, _)) = self.get(&key) {
-            if *d >= value.0 {
+    pub fn set_eval(&mut self, key: u64, max: bool, value: (u8, Transposition)) {
+        if let Some(&entry) = self.get(&key, max) {
+            if entry.0 >= value.0 {
                 return;
             }
         }
 
-        self.set(key, value);
+        self.set(key, max, value);
     }
 }
 
@@ -77,22 +99,33 @@ impl Evaluation {
     }
 
     fn alpha_beta<T: Heuristic>(&self, root: &T, depth: u8, mut alpha: f32, mut beta: f32) -> f32 {
-        if self.use_cache {
-            let handle = self.table.lock().unwrap();
-            if let Some(eval) = handle.get_eval(&root.calculate_hash(), &depth) {
-                return eval;
-            }
-        }
+        let max = root.is_maximizing();
+
         if depth == 0 || root.is_terminal() {
-            let result = root.calculate();
-            if self.use_cache {
-                let mut handle = self.table.lock().unwrap();
-                handle.set_eval(root.calculate_hash(), (depth, result));
-            }
-            return result;
+            return root.calculate();
         }
 
-        let mut value = if root.is_maximizing() {
+        if self.use_cache {
+            let handle = self.table.lock().unwrap();
+            if let Some(eval) = handle.get_eval(root.calculate_hash(), depth, max) {
+                match eval {
+                    Transposition::Exact(v) => return v,
+                    Transposition::Lower(v) => alpha = alpha.max(v),
+                    Transposition::Upper(v) => beta = beta.min(v),
+                }
+                if alpha >= beta {
+                    return match eval {
+                        Transposition::Exact(v) => v,
+                        Transposition::Lower(v) => v,
+                        Transposition::Upper(v) => v,
+                    };
+                }
+            }
+        }
+
+        let original = if max { alpha } else { beta };
+
+        let mut value = if max {
             f32::NEG_INFINITY
         } else {
             f32::INFINITY
@@ -115,7 +148,26 @@ impl Evaluation {
 
         if self.use_cache {
             let mut handle = self.table.lock().unwrap();
-            handle.set_eval(root.calculate_hash(), (depth, value));
+            let class = if value == original {
+                Class::Bound
+            } else {
+                if value > original {
+                    Class::Cutoff
+                } else {
+                    Class::Exact
+                }
+            };
+            let transposition = match (class, max) {
+                (Class::Bound, true) => Transposition::Upper(value),
+                (Class::Bound, false) => Transposition::Lower(value),
+
+                (Class::Cutoff, true) => Transposition::Lower(value),
+                (Class::Cutoff, false) => Transposition::Upper(value),
+
+                (Class::Exact, _) => Transposition::Exact(value),
+            };
+
+            handle.set_eval(root.calculate_hash(), max, (depth, transposition));
         }
         value
     }

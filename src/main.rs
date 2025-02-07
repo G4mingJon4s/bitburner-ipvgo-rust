@@ -22,26 +22,28 @@ const DEPTH: u8 = 4;
 struct Args {
     #[arg(short, long, default_value_t = DEPTH)]
     depth: u8,
+    #[arg(short, long, default_value_t = false)]
+    manual: bool,
 }
 
 fn main() {
     let args = Args::parse();
     let depth = args.depth;
+    let manual = args.manual;
 
     let sin = stdin();
 
-    loop {
-        let state = IO::read_state(&sin);
-        if let Err(e) = state {
-            eprintln!("Error: {}", e);
-            thread::sleep(Duration::from_millis(2000));
-            continue;
-        }
+    let state = IO::read_state(&sin);
+    if let Err(e) = state {
+        eprintln!("Error: {}", e);
+        return;
+    }
 
-        let (rep, turn, komi) = state.unwrap();
-        let mut board = Board::from(&rep, turn, komi).expect("Board parsing error");
+    let (rep, turn, komi) = state.unwrap();
+    let mut board = Board::from(&rep, turn, komi).expect("Board parsing error");
 
-        while board.turn != Turn::None {
+    while board.turn != Turn::None {
+        if !manual {
             let start = Instant::now();
             let evaluation_threads: Vec<_> = board
                 .valid_moves()
@@ -75,28 +77,27 @@ fn main() {
                 .collect();
 
             IO::print_move_evalutations(move_evaluation, board.is_maximizing(), time);
-
-            let mv = IO::read_move(&sin);
-            if let Err(e) = mv {
-                eprintln!("Error: {}", e);
-                thread::sleep(Duration::from_millis(2000));
-                continue;
-            }
-
-            let parsed_move = mv.unwrap();
-            let new_board = board.make_move(parsed_move);
-            if let Err(e) = new_board {
-                eprintln!("Error: {}", e);
-                thread::sleep(Duration::from_millis(2000));
-                continue;
-            }
-
-            board = new_board.unwrap();
-            IO::print_result(parsed_move, &board);
-            IO::press_enter_continue(&sin);
         }
 
-        println!("The game is over");
+        let mv = IO::read_move(&sin);
+        if let Err(e) = mv {
+            eprintln!("Error: {}", e);
+            thread::sleep(Duration::from_millis(2000));
+            continue;
+        }
+
+        let parsed_move = mv.unwrap();
+        let new_board = board.make_move(parsed_move);
+        if let Err(e) = new_board {
+            eprintln!("Error: {}", e);
+            thread::sleep(Duration::from_millis(2000));
+            continue;
+        }
+
+        board = new_board.unwrap();
+        IO::print_result(parsed_move, &board);
         IO::press_enter_continue(&sin);
     }
+
+    println!("The game is over");
 }

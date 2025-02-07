@@ -1,5 +1,9 @@
-use crate::{board::*, util::*};
 use std::collections::HashSet;
+
+use crate::{
+    board::Board,
+    util::{Chains, Tile, Turn},
+};
 
 pub trait Heuristic
 where

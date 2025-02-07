@@ -1,6 +1,9 @@
 use std::{io::Stdin, time::Duration};
 
-use crate::{board::*, util::*};
+use crate::{
+    board::Board,
+    util::{Move, Turn},
+};
 
 pub struct IO;
 impl IO {

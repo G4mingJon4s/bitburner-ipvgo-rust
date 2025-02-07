@@ -1,10 +1,11 @@
-use crate::util::*;
 use std::fmt::Debug;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::{
     collections::{HashSet, LinkedList},
     iter,
 };
+
+use crate::util::{ChainData, Chains, Move, PreviousData, Tile, Turn};
 
 pub struct Board {
     pub white: Vec<u32>,

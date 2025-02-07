@@ -1,19 +1,20 @@
-use std::io::stdin;
-use std::sync::mpsc;
-use std::thread;
-use std::time::{Duration, Instant};
+use std::{
+    io::stdin,
+    sync::mpsc,
+    thread,
+    time::{Duration, Instant},
+};
+
+use board::Board;
+use clap::Parser;
+use eval::{Evaluation, Heuristic};
+use io::IO;
+use util::{Move, Turn};
 
 pub mod board;
 pub mod eval;
 pub mod io;
 pub mod util;
-
-use clap::Parser;
-
-use crate::board::*;
-use crate::eval::*;
-use crate::io::IO;
-use crate::util::*;
 
 const DEPTH: u8 = 4;
 

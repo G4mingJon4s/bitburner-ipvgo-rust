@@ -1,5 +1,6 @@
 use std::{
     io::stdin,
+    sync::Arc,
     thread,
     time::{Duration, Instant},
 };
@@ -27,6 +28,8 @@ struct Args {
     #[arg(short, long, default_value_t = THREADS)]
     threads: usize,
     #[arg(short, long, default_value_t = false)]
+    no_cache: bool,
+    #[arg(short, long, default_value_t = false)]
     manual: bool,
 }
 
@@ -41,6 +44,8 @@ fn main() {
         max_threads: threads,
     };
 
+    let evaluation = Arc::new(Evaluation::new(!args.no_cache));
+
     let state = IO::read_state(&sin);
     if let Err(e) = state {
         eprintln!("Error: {}", e);
@@ -54,9 +59,13 @@ fn main() {
         if !manual {
             let start = Instant::now();
 
-            let move_evaluation =
-                pool.execute(&board.valid_moves().collect::<Vec<_>>(), move |(m, b)| {
-                    let eval = Evaluation::evaluate(b, depth);
+            let move_evaluation = pool.execute(
+                &board
+                    .valid_moves()
+                    .map(|(m, b)| (m, b, evaluation.clone()))
+                    .collect::<Vec<_>>(),
+                move |(m, b, e)| {
+                    let eval = e.evaluate(b, depth);
                     (
                         match *m {
                             Move::Pos(p) => Move::Coords(b.to_coords(p)),
@@ -64,7 +73,8 @@ fn main() {
                         },
                         eval,
                     )
-                });
+                },
+            );
 
             let end = Instant::now();
             let time = end - start;

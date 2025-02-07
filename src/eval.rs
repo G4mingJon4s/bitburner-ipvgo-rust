@@ -1,4 +1,7 @@
-use std::collections::HashSet;
+use std::{
+    collections::{HashMap, HashSet},
+    sync::{Arc, Mutex},
+};
 
 use crate::{
     board::Board,
@@ -12,18 +15,81 @@ where
     fn calculate(&self) -> f32;
     fn is_terminal(&self) -> bool;
     fn is_maximizing(&self) -> bool;
+    fn calculate_hash(&self) -> u64;
     fn get_children(&self) -> impl Iterator<Item = Self>;
 }
 
-pub struct Evaluation;
-impl Evaluation {
-    pub fn evaluate<T: Heuristic>(root: &T, depth: u8) -> f32 {
-        Evaluation::alpha_beta(root, depth, f32::NEG_INFINITY, f32::INFINITY)
+pub struct TranspositionTable {
+    map: HashMap<u64, (u8, f32)>,
+}
+impl TranspositionTable {
+    pub fn new() -> Self {
+        Self {
+            map: HashMap::new(),
+        }
     }
 
-    fn alpha_beta<T: Heuristic>(root: &T, depth: u8, mut alpha: f32, mut beta: f32) -> f32 {
+    pub fn get(&self, key: &u64) -> Option<&(u8, f32)> {
+        self.map.get(key)
+    }
+
+    pub fn get_eval(&self, key: &u64, depth: &u8) -> Option<f32> {
+        let entry = self.map.get(key);
+        entry.map(|t| match t.0 {
+            value if value >= *depth => Some(t.1),
+            _ => None,
+        })?
+    }
+
+    pub fn set(&mut self, key: u64, value: (u8, f32)) {
+        self.map.insert(key, value);
+    }
+
+    pub fn set_eval(&mut self, key: u64, value: (u8, f32)) {
+        if let Some((d, _)) = self.get(&key) {
+            if *d >= value.0 {
+                return;
+            }
+        }
+
+        self.set(key, value);
+    }
+}
+
+pub type Table = Arc<Mutex<TranspositionTable>>;
+
+#[derive(Clone)]
+pub struct Evaluation {
+    table: Table,
+    use_cache: bool,
+}
+
+impl Evaluation {
+    pub fn new(use_cache: bool) -> Self {
+        Self {
+            table: Arc::new(Mutex::new(TranspositionTable::new())),
+            use_cache,
+        }
+    }
+
+    pub fn evaluate<T: Heuristic>(&self, root: &T, depth: u8) -> f32 {
+        self.alpha_beta(root, depth, f32::NEG_INFINITY, f32::INFINITY)
+    }
+
+    fn alpha_beta<T: Heuristic>(&self, root: &T, depth: u8, mut alpha: f32, mut beta: f32) -> f32 {
+        if self.use_cache {
+            let handle = self.table.lock().unwrap();
+            if let Some(eval) = handle.get_eval(&root.calculate_hash(), &depth) {
+                return eval;
+            }
+        }
         if depth == 0 || root.is_terminal() {
-            return root.calculate();
+            let result = root.calculate();
+            if self.use_cache {
+                let mut handle = self.table.lock().unwrap();
+                handle.set_eval(root.calculate_hash(), (depth, result));
+            }
+            return result;
         }
 
         let mut value = if root.is_maximizing() {
@@ -32,7 +98,7 @@ impl Evaluation {
             f32::INFINITY
         };
         for child in root.get_children() {
-            let eval = Evaluation::alpha_beta(&child, depth - 1, alpha, beta);
+            let eval = self.alpha_beta(&child, depth - 1, alpha, beta);
 
             if root.is_maximizing() {
                 value = value.max(eval);
@@ -47,6 +113,10 @@ impl Evaluation {
             }
         }
 
+        if self.use_cache {
+            let mut handle = self.table.lock().unwrap();
+            handle.set_eval(root.calculate_hash(), (depth, value));
+        }
         value
     }
 }
@@ -108,6 +178,10 @@ impl Heuristic for Board {
 
     fn is_maximizing(&self) -> bool {
         self.turn == Turn::Black
+    }
+
+    fn calculate_hash(&self) -> u64 {
+        self.get_hash()
     }
 
     fn get_children(&self) -> impl Iterator<Item = Self> {

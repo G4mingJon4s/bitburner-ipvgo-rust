@@ -1,6 +1,5 @@
 use std::{
     io::stdin,
-    sync::mpsc,
     thread,
     time::{Duration, Instant},
 };
@@ -9,19 +8,24 @@ use board::Board;
 use clap::Parser;
 use eval::{Evaluation, Heuristic};
 use io::IO;
+use threads::ThreadPool;
 use util::{Move, Turn};
 
 pub mod board;
 pub mod eval;
 pub mod io;
+pub mod threads;
 pub mod util;
 
 const DEPTH: u8 = 4;
+const THREADS: usize = 5;
 
 #[derive(Parser, Debug)]
 struct Args {
     #[arg(short, long, default_value_t = DEPTH)]
     depth: u8,
+    #[arg(short, long, default_value_t = THREADS)]
+    threads: usize,
     #[arg(short, long, default_value_t = false)]
     manual: bool,
 }
@@ -29,9 +33,13 @@ struct Args {
 fn main() {
     let args = Args::parse();
     let depth = args.depth;
+    let threads = args.threads;
     let manual = args.manual;
 
     let sin = stdin();
+    let pool = ThreadPool {
+        max_threads: threads,
+    };
 
     let state = IO::read_state(&sin);
     if let Err(e) = state {
@@ -45,36 +53,21 @@ fn main() {
     while board.turn != Turn::None {
         if !manual {
             let start = Instant::now();
-            let evaluation_threads: Vec<_> = board
-                .valid_moves()
-                .map(|(m, b)| {
-                    let (tx, rx) = mpsc::channel();
-                    let handle = thread::spawn(move || {
-                        let result = Evaluation::evaluate(&b, depth);
-                        tx.send(result).expect("Recieving failed!");
-                    });
+
+            let move_evaluation =
+                pool.execute(&board.valid_moves().collect::<Vec<_>>(), move |(m, b)| {
+                    let eval = Evaluation::evaluate(b, depth);
                     (
-                        match m {
-                            Move::Pos(p) => Move::Coords(board.to_coords(p)),
+                        match *m {
+                            Move::Pos(p) => Move::Coords(b.to_coords(p)),
                             v => v,
                         },
-                        handle,
-                        rx,
+                        eval,
                     )
-                })
-                .collect();
-
-            while !evaluation_threads.iter().any(|(_, h, _)| h.is_finished()) {
-                thread::sleep(Duration::from_millis(1));
-            }
+                });
 
             let end = Instant::now();
             let time = end - start;
-
-            let move_evaluation: Vec<_> = evaluation_threads
-                .iter()
-                .map(|(m, _, rx)| (*m, rx.recv().unwrap()))
-                .collect();
 
             IO::print_move_evalutations(move_evaluation, board.is_maximizing(), time);
         }

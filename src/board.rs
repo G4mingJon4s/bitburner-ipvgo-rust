@@ -1,9 +1,7 @@
+use std::collections::VecDeque;
 use std::fmt::Debug;
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::{
-    collections::{HashSet, LinkedList},
-    iter,
-};
+use std::{collections::HashSet, iter};
 
 use crate::util::{ChainData, Chains, Move, PreviousData, Tile, Turn};
 
@@ -16,7 +14,9 @@ pub struct Board {
     pub turn: Turn,
 
     pub komi: f32,
-    pub prev: LinkedList<PreviousData>,
+    pub prev: Vec<PreviousData>,
+
+    neighbors: Vec<[usize; 4]>,
 }
 
 impl Debug for Board {
@@ -44,6 +44,8 @@ impl Clone for Board {
             komi: self.komi,
             size: self.size,
             turn: self.turn,
+
+            neighbors: self.neighbors.clone(),
         }
     }
 }
@@ -81,9 +83,7 @@ impl Chains for Board {
         let mut tiles: HashSet<usize> = HashSet::new();
         let mut adjacent: HashSet<usize> = HashSet::new();
         let mut liberties: HashSet<usize> = HashSet::new();
-        let mut queue: LinkedList<usize> = LinkedList::new();
-
-        queue.push_front(pos);
+        let mut queue = VecDeque::from([pos]);
 
         while let Some(cur) = queue.pop_front() {
             if tiles.contains(&cur) {
@@ -91,7 +91,10 @@ impl Chains for Board {
             }
             tiles.insert(cur);
 
-            for p in self.neighbors(cur) {
+            for p in self.neighbors[cur] {
+                if p == usize::MAX {
+                    continue;
+                }
                 let t = self.tile(p);
                 if t == tile {
                     queue.push_back(p);
@@ -123,15 +126,54 @@ impl Board {
         let black = vec![0; sets_of_32];
         let dead = vec![0; sets_of_32];
 
-        Self {
+        let neighbors: Vec<[usize; 4]> = Vec::new();
+
+        let mut board = Self {
             white,
             black,
             dead,
             size,
             turn,
             komi,
-            prev: LinkedList::new(),
-        }
+            prev: Vec::new(),
+
+            neighbors,
+        };
+
+        board.neighbors = (0..((size as usize).pow(2)))
+            .map(|pos| {
+                let (x, y) = board.to_coords(pos);
+                let mut nbrs = [0; 4];
+                let mut count = 0;
+
+                if x > 0 {
+                    nbrs[count] = board.to_pos(x - 1, y);
+                    count += 1;
+                }
+                if x + 1 < size as usize {
+                    nbrs[count] = board.to_pos(x + 1, y);
+                    count += 1;
+                }
+                if y > 0 {
+                    nbrs[count] = board.to_pos(x, y - 1);
+                    count += 1;
+                }
+                if y + 1 < size as usize {
+                    nbrs[count] = board.to_pos(x, y + 1);
+                    count += 1;
+                }
+
+                // Pad with a default value if fewer than 4 neighbors
+                while count < 4 {
+                    nbrs[count] = usize::MAX; // Or some other invalid value
+                    count += 1;
+                }
+
+                nbrs
+            })
+            .collect();
+
+        board
     }
 
     pub fn get_hash(&self) -> u64 {
@@ -180,33 +222,15 @@ impl Board {
         (pos / self.size as usize, pos % self.size as usize)
     }
 
-    fn neighbors(&self, pos: usize) -> Vec<usize> {
-        let (x, y) = self.to_coords(pos);
-        vec![
-            (x.checked_sub(1), Some(y)),
-            (x.checked_add(1), Some(y)),
-            (Some(x), y.checked_sub(1)),
-            (Some(x), y.checked_add(1)),
-        ]
-        .iter()
-        .filter(|(x, y)| {
-            (x.is_some() && y.is_some())
-                && (x.unwrap() < self.size as usize)
-                && (y.unwrap() < self.size as usize)
-        })
-        .map(|(x, y)| self.to_pos(x.unwrap(), y.unwrap()))
-        .collect::<Vec<_>>()
-    }
-
     fn pass(&self) -> Board {
         let mut new_board = self.clone();
 
-        let new_turn = match self.prev.front() {
+        let new_turn = match self.prev.last() {
             Some(p) if p.mv == Move::Pass => Turn::None,
             _ => self.turn.next(),
         };
         new_board.turn = new_turn;
-        new_board.prev.push_front(PreviousData {
+        new_board.prev.push(PreviousData {
             board: self.get_hash(),
             mv: Move::Pass,
         });
@@ -232,14 +256,17 @@ impl Board {
 
         new_board.set_tile(pos, tile);
         new_board.turn = self.turn.next();
-        new_board.prev.push_front(PreviousData {
+        new_board.prev.push(PreviousData {
             board: self.get_hash(),
             mv: Move::Pos(pos),
         });
 
         let next_tile: Tile = new_board.turn.try_into()?;
 
-        for aff in self.neighbors(pos) {
+        for aff in self.neighbors[pos] {
+            if aff == usize::MAX {
+                continue;
+            }
             if new_board.tile(aff) != next_tile {
                 continue;
             }
@@ -303,16 +330,16 @@ impl Board {
 
     pub fn get_board_state(&self) -> String {
         let size = self.size as usize;
-        (0..size)
-            .map(|x| {
-                String::from_iter(
-                    (0..size)
-                        .map(|y| self.tile(self.to_pos(x, y)).into())
-                        .collect::<Vec<char>>()
-                        .iter(),
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
+        let capacity = size * size + (size - 1);
+        let mut s = String::with_capacity(capacity);
+        for x in 0..size {
+            for y in 0..size {
+                s.push(self.tile(self.to_pos(x, y)).into());
+            }
+            if x < size - 1 {
+                s.push('\n');
+            }
+        }
+        s
     }
 }

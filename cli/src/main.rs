@@ -29,9 +29,7 @@ fn main() {
     let manual = args.manual;
 
     let sin = stdin();
-    let pool = ThreadPool {
-        max_threads: threads,
-    };
+    let pool = ThreadPool::new(threads);
 
     let state = IO::read_state(&sin);
     if let Err(e) = state {

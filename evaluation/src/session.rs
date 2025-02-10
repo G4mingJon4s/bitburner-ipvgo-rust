@@ -4,7 +4,7 @@ use std::{
 };
 
 use board::{util::Move, Board, BoardData};
-use threads::ThreadPool;
+use threads::{Pool, PoolHandle};
 
 use crate::evaluation::{Evaluation, Heuristic};
 
@@ -37,31 +37,19 @@ impl Session {
         self.board.is_terminal()
     }
 
-    pub fn get_current_evaluation(&self, pool: &ThreadPool) -> (Duration, Vec<(Move, f32)>) {
-        let moves = self.board.valid_moves().collect::<Vec<_>>();
-        let __relative = moves.len() as f32 / self.board.size.pow(2) as f32;
-        let depth = self.max_depth;
-
+    pub fn get_current_evaluation<P: Pool>(&self, pool: &P) -> (Duration, Vec<(Move, f32)>) {
         let start = Instant::now();
-
-        let results = pool.execute::<(Move, Board, Arc<Evaluation>), (Move, f32)>(
-            &self
-                .board
+        let results = <P as Pool>::multiple(
+            self.board
                 .valid_moves()
-                .map(|(m, b)| (m, b, self.evaluation.clone()))
-                .collect::<Vec<_>>(),
-            move |(m, b, e)| {
-                (
-                    match *m {
-                        Move::Pos(p) => Move::Coords(b.to_coords(p)),
-                        v => v,
-                    },
-                    e.evaluate(b, depth),
-                )
-            },
+                .map(|(m, b)| (m, b, self.evaluation.clone(), self.max_depth))
+                .collect(),
+            |(m, b, e, d)| (m, e.evaluate(&b, d)),
+            pool.get_max_threads(),
         );
 
+        let evaluations = PoolHandle::recv_all(results);
         let end = Instant::now();
-        (end - start, results)
+        (end - start, evaluations)
     }
 }

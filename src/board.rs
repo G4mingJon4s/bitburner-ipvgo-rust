@@ -5,6 +5,13 @@ use std::{collections::HashSet, iter};
 
 use crate::util::{ChainData, Chains, Move, PreviousData, Tile, Turn};
 
+pub struct BoardData {
+    pub komi: f32,
+    pub turn: Turn,
+    pub rep: String,
+    pub size: u8,
+}
+
 pub struct Board {
     pub white: Vec<u32>,
     pub black: Vec<u32>,
@@ -302,27 +309,18 @@ impl Board {
         ))
     }
 
-    pub fn from(rep: &Vec<String>, turn: Turn, komi: f32) -> Result<Self, String> {
-        let data: Vec<&str> = rep
-            .iter()
-            .map(|l| l.trim())
-            .filter(|l| !l.is_empty())
-            .collect();
-        let size: u8 = data
-            .len()
-            .try_into()
-            .map_err(|_| "Size is too big".to_string())?;
+    pub fn from(data: &BoardData) -> Result<Self, String> {
+        let rep = data
+            .rep
+            .replace(" ", "")
+            .replace("\r", "")
+            .replace("\n", "")
+            .replace(":", "");
+        assert_eq!(data.size.pow(2) as usize, rep.len(), "Invalid rep shape");
 
-        if data.iter().any(|l| l.len() != size as usize) {
-            return Err("Board is not a square".to_string());
-        }
-
-        let mut board = Self::new(size, turn, komi);
-
-        for x in 0..(size as usize) {
-            for (y, c) in data[x].chars().enumerate() {
-                board.set_tile(board.to_pos(x, y), Tile::try_from(c)?);
-            }
+        let mut board = Board::new(data.size, data.turn, data.komi);
+        for (pos, c) in rep.char_indices() {
+            board.set_tile(pos, Tile::try_from(c)?);
         }
 
         Ok(board)

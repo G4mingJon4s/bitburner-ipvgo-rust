@@ -1,21 +1,21 @@
 use std::{io::Stdin, time::Duration};
 
 use crate::{
-    board::Board,
+    board::{Board, BoardData},
     util::{Move, Turn},
 };
 
 pub struct IO;
 impl IO {
-    pub fn read_state(stdin: &Stdin) -> Result<(Vec<String>, Turn, f32), String> {
-        println!("Please input your board state (Turn;Board:with:semicolons;Komi):");
+    pub fn read_state(stdin: &Stdin) -> Result<BoardData, String> {
+        println!("Please input your board state (Turn;Size;Board:with:semicolons;Komi):");
 
         let mut s = String::new();
         stdin.read_line(&mut s).map_err(|e| e.to_string())?;
         println!("");
 
         let parts: Vec<_> = s.trim().split(";").map(|s| s.to_string()).collect();
-        if parts.len() != 3 {
+        if parts.len() != 4 {
             return Err("Missing information".to_string());
         }
 
@@ -24,12 +24,15 @@ impl IO {
             .nth(0)
             .ok_or("Invalid turn char".to_string())?;
         let turn = Turn::try_from(turn_char)?;
-        let rep = parts[1]
-            .split(":")
-            .map(|s| s.to_string())
-            .collect::<Vec<_>>();
-        let komi = parts[2].parse::<f32>().map_err(|e| e.to_string())?;
-        Ok((rep, turn, komi))
+        let size = parts[1].parse::<u8>().map_err(|e| e.to_string())?;
+        let rep = parts[2].clone();
+        let komi = parts[3].parse::<f32>().map_err(|e| e.to_string())?;
+        Ok(BoardData {
+            komi,
+            size,
+            turn,
+            rep,
+        })
     }
 
     pub fn read_move(stdin: &Stdin) -> Result<Move, String> {

@@ -1,17 +1,11 @@
 use std::{io::stdin, thread, time::Duration};
 
 use clap::Parser;
-use eval::Heuristic;
+use evaluation::{evaluation::Heuristic, session::Session};
 use io::IO;
-use session::Session;
 use threads::ThreadPool;
 
-pub mod board;
-pub mod eval;
-pub mod io;
-pub mod session;
-pub mod threads;
-pub mod util;
+mod io;
 
 const DEPTH: u8 = 4;
 const THREADS: usize = 5;

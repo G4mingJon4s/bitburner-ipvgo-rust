@@ -1,10 +1,10 @@
-[package]
-name = "ipvgo-rust"
+[workspace]
+resolver = "2"
+members = ["board", "cli", "evaluation", "threads"]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2021"
 
 [profile.release]
 lto = "fat"
-
-[dependencies]
-clap = { version = "4.5.28", features = ["derive"] }

@@ -1,8 +1,8 @@
 use std::{io::Stdin, time::Duration};
 
-use crate::{
-    board::{Board, BoardData},
+use board::{
     util::{Move, Turn},
+    Board, BoardData,
 };
 
 pub struct IO;

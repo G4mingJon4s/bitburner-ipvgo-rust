@@ -5,6 +5,8 @@ use std::{collections::HashSet, iter};
 
 use crate::util::{ChainData, Chains, Move, PreviousData, Tile, Turn};
 
+pub mod util;
+
 pub struct BoardData {
     pub komi: f32,
     pub turn: Turn,

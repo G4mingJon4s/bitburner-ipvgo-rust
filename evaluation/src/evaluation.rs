@@ -3,9 +3,9 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use crate::{
-    board::Board,
+use board::{
     util::{Chains, Tile, Turn},
+    Board,
 };
 
 pub trait Heuristic

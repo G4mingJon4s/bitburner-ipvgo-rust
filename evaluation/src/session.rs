@@ -3,12 +3,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::{
-    board::{Board, BoardData},
-    eval::{Evaluation, Heuristic},
-    threads::ThreadPool,
-    util::Move,
-};
+use board::{util::Move, Board, BoardData};
+use threads::ThreadPool;
+
+use crate::evaluation::{Evaluation, Heuristic};
 
 pub struct Session {
     board: Board,

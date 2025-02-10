@@ -1,0 +1,8 @@
+[package]
+name = "evaluation"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+board = { path = "../board" }
+threads = { path = "../threads" }

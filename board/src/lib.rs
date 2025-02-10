@@ -14,6 +14,30 @@ pub struct BoardData {
     pub size: u8,
 }
 
+impl BoardData {
+    pub fn from(s: String) -> Result<Self, String> {
+        let parts: Vec<_> = s.trim().split(";").map(|s| s.to_string()).collect();
+        if parts.len() != 4 {
+            return Err("Missing information".to_string());
+        }
+
+        let turn_char = parts[0]
+            .chars()
+            .nth(0)
+            .ok_or("Invalid turn char".to_string())?;
+        let turn = Turn::try_from(turn_char)?;
+        let size = parts[1].parse::<u8>().map_err(|e| e.to_string())?;
+        let rep = parts[2].clone();
+        let komi = parts[3].parse::<f32>().map_err(|e| e.to_string())?;
+        Ok(BoardData {
+            komi,
+            size,
+            turn,
+            rep,
+        })
+    }
+}
+
 pub struct Board {
     pub white: Vec<u32>,
     pub black: Vec<u32>,

@@ -1,9 +1,6 @@
 use std::{io::Stdin, time::Duration};
 
-use board::{
-    util::{Move, Turn},
-    Board, BoardData,
-};
+use board::{util::Move, Board, BoardData};
 
 pub struct IO;
 impl IO {
@@ -14,25 +11,7 @@ impl IO {
         stdin.read_line(&mut s).map_err(|e| e.to_string())?;
         println!("");
 
-        let parts: Vec<_> = s.trim().split(";").map(|s| s.to_string()).collect();
-        if parts.len() != 4 {
-            return Err("Missing information".to_string());
-        }
-
-        let turn_char = parts[0]
-            .chars()
-            .nth(0)
-            .ok_or("Invalid turn char".to_string())?;
-        let turn = Turn::try_from(turn_char)?;
-        let size = parts[1].parse::<u8>().map_err(|e| e.to_string())?;
-        let rep = parts[2].clone();
-        let komi = parts[3].parse::<f32>().map_err(|e| e.to_string())?;
-        Ok(BoardData {
-            komi,
-            size,
-            turn,
-            rep,
-        })
+        BoardData::from(s)
     }
 
     pub fn read_move(stdin: &Stdin) -> Result<Move, String> {

@@ -1,0 +1,10 @@
+[package]
+name = "server"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+board = { path = "../board" }
+evaluation = { path = "../evaluation" }
+rocket = { version = "0.5.1", features = ["json"] }
+threads = { path = "../threads" }

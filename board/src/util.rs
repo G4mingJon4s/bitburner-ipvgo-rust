@@ -1,6 +1,8 @@
 use std::fmt::Display;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Tile {
     White,
     Black,
@@ -39,7 +41,7 @@ impl TryFrom<char> for Tile {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Turn {
     White,
     Black,
@@ -78,7 +80,29 @@ impl TryFrom<char> for Turn {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+impl TryFrom<String> for Turn {
+    type Error = String;
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        match value.to_lowercase().as_str() {
+            "white" => Ok(Turn::White),
+            "black" => Ok(Turn::Black),
+            "none" => Ok(Turn::None),
+            _ => Err("Invalid string".to_string()),
+        }
+    }
+}
+
+impl Into<&'static str> for Turn {
+    fn into(self) -> &'static str {
+        match self {
+            Turn::White => "White",
+            Turn::Black => "Black",
+            Turn::None => "None",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Move {
     Pos(usize),
     Coords((usize, usize)),

@@ -8,6 +8,7 @@ use threads::{Pool, PoolHandle};
 
 use crate::evaluation::{Evaluation, Heuristic};
 
+#[derive(Clone)]
 pub struct Session {
     board: Board,
     evaluation: Arc<Evaluation>,

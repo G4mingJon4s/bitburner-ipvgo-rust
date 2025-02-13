@@ -1,4 +1,9 @@
-use std::{io::stdin, thread, time::Duration};
+use std::{
+    io::stdin,
+    thread::{self, available_parallelism},
+    time::Duration,
+    usize,
+};
 
 use board::Board;
 use clap::Parser;
@@ -8,25 +13,36 @@ use io::IO;
 mod io;
 
 const DEPTH: u8 = 4;
-const THREADS: usize = 5;
 
 #[derive(Parser, Debug)]
 struct Args {
     #[arg(short, long, default_value_t = DEPTH)]
     depth: u8,
-    #[arg(short, long, default_value_t = THREADS)]
-    threads: usize,
+    #[arg(short, long, default_value_t = 0_f32)]
+    threads: f32,
     #[arg(short, long, default_value_t = false)]
     no_cache: bool,
-    #[arg(short, long, default_value_t = false)]
-    manual: bool,
 }
 
 fn main() {
     let args = Args::parse();
     let depth = args.depth;
     let threads = args.threads;
-    let manual = args.manual;
+
+    let available_cores = available_parallelism().unwrap().get();
+
+    let threads: usize = if threads.is_sign_negative() || threads == 0_f32 {
+        available_cores / 2
+    } else if threads.floor() == threads {
+        threads.floor() as usize
+    } else {
+        (available_cores as f32 * threads)
+            .clamp(1_f32, available_cores as f32)
+            .floor() as usize
+    };
+
+    println!("Running with {} threads", threads);
+    println!("Calculating with a depth of {}", depth);
 
     rayon::ThreadPoolBuilder::new()
         .num_threads(threads)
@@ -45,10 +61,8 @@ fn main() {
     let mut board = Board::from(&state.unwrap()).expect("Could not instantiate session");
 
     while !board.is_terminal() {
-        if !manual {
-            let (time, move_evaluation) = board.evaluate(&evaluator, depth);
-            IO::print_move_evalutations(&board, move_evaluation, board.is_maximizing(), time);
-        }
+        let (time, move_evaluation) = board.evaluate(&evaluator, depth);
+        IO::print_move_evalutations(&board, move_evaluation, board.is_maximizing(), time);
 
         let mv = IO::read_move(&sin);
         if let Err(e) = mv {

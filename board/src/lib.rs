@@ -270,6 +270,12 @@ impl Board {
         new_board
     }
 
+    pub fn make_move_mut(&mut self, mv: Move) -> Result<(), String> {
+        let new_board = self.make_move(mv)?;
+        *self = new_board;
+        Ok(())
+    }
+
     pub fn make_move(&self, mv: Move) -> Result<Board, String> {
         if mv == Move::Pass {
             return Ok(self.pass());

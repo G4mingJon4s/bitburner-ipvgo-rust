@@ -7,4 +7,4 @@ edition.workspace = true
 board = { path = "../board" }
 clap = { version = "4.5.28", features = ["derive"] }
 evaluation = { path = "../evaluation" }
-threads = { path = "../threads" }
+rayon = "1.10.0"

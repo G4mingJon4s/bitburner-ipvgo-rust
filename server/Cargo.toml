@@ -7,4 +7,3 @@ edition.workspace = true
 board = { path = "../board" }
 evaluation = { path = "../evaluation" }
 rocket = { version = "0.5.1", features = ["json"] }
-threads = { path = "../threads" }

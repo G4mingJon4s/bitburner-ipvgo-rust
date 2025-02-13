@@ -5,4 +5,4 @@ edition.workspace = true
 
 [dependencies]
 board = { path = "../board" }
-threads = { path = "../threads" }
+rayon = "1.10.0"

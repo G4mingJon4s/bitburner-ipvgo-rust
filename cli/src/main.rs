@@ -1,9 +1,9 @@
 use std::{io::stdin, thread, time::Duration};
 
+use board::Board;
 use clap::Parser;
-use evaluation::{evaluation::Heuristic, session::Session};
+use evaluation::{Evaluator, Heuristic};
 use io::IO;
-use threads::ThreadPool;
 
 mod io;
 
@@ -28,8 +28,13 @@ fn main() {
     let threads = args.threads;
     let manual = args.manual;
 
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(threads)
+        .build_global()
+        .expect("Thread pool error");
+
     let sin = stdin();
-    let pool = ThreadPool::new(threads);
+    let evaluator = Evaluator::new(!args.no_cache);
 
     let state = IO::read_state(&sin);
     if let Err(e) = state {
@@ -37,13 +42,12 @@ fn main() {
         return;
     }
 
-    let mut session = Session::new(&state.unwrap(), !args.no_cache, depth)
-        .expect("Could not instantiate session");
+    let mut board = Board::from(&state.unwrap()).expect("Could not instantiate session");
 
-    while !session.is_over() {
+    while !board.is_terminal() {
         if !manual {
-            let (time, move_evaluation) = session.get_current_evaluation(&pool);
-            IO::print_move_evalutations(move_evaluation, session.get_board().is_maximizing(), time);
+            let (time, move_evaluation) = board.evaluate(&evaluator, depth);
+            IO::print_move_evalutations(&board, move_evaluation, board.is_maximizing(), time);
         }
 
         let mv = IO::read_move(&sin);
@@ -54,14 +58,14 @@ fn main() {
         }
 
         let parsed_move = mv.unwrap();
-        let new_board = session.make_move(parsed_move);
+        let new_board = board.make_move_mut(parsed_move);
         if let Err(e) = new_board {
             eprintln!("Error: {}", e);
             thread::sleep(Duration::from_millis(2000));
             continue;
         }
 
-        IO::print_result(parsed_move, session.get_board());
+        IO::print_result(parsed_move, &board);
         IO::press_enter_continue(&sin);
     }
 

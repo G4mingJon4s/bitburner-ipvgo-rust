@@ -1,8 +1,8 @@
 use board::{
     util::{Move, Turn},
-    BoardData,
+    Board, BoardData,
 };
-use evaluation::{evaluation::Heuristic, session::Session};
+use evaluation::Heuristic;
 use rocket::serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
@@ -33,7 +33,7 @@ impl Into<BoardData> for SessionCreateData {
 
 #[derive(Serialize, Deserialize)]
 #[serde(crate = "rocket::serde")]
-pub struct SessionStateData {
+pub struct SessionBoardState {
     pub turn: Turn,
     pub size: u8,
     pub rep: String,
@@ -42,15 +42,14 @@ pub struct SessionStateData {
     pub current_score: f32,
 }
 
-impl SessionStateData {
-    pub fn new(session: &Session) -> Self {
-        let board = session.get_board();
+impl SessionBoardState {
+    pub fn new(board: &Board) -> Self {
         Self {
             size: board.size,
             turn: board.turn,
             komi: board.komi,
             rep: board.get_board_state(),
-            current_score: board.calculate(),
+            current_score: board.calculate_heuristic(),
         }
     }
 }
@@ -65,11 +64,11 @@ pub struct SessionMoveRequest {
 #[serde(crate = "rocket::serde")]
 pub struct SessionMoveResponse {
     pub mv: Move,
-    pub state: SessionStateData,
+    pub state: SessionBoardState,
 }
 
 impl SessionMoveResponse {
-    pub fn new(mv: Move, state: SessionStateData) -> Self {
+    pub fn new(mv: Move, state: SessionBoardState) -> Self {
         Self { mv, state }
     }
 }

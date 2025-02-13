@@ -38,7 +38,12 @@ impl IO {
         stdin.read_line(&mut s).unwrap();
     }
 
-    pub fn print_move_evalutations(moves: Vec<(Move, f32)>, maximizing: bool, time: Duration) {
+    pub fn print_move_evalutations(
+        root: &Board,
+        moves: Vec<(Move, f32)>,
+        maximizing: bool,
+        time: Duration,
+    ) {
         println!("Move evaluations ({} seconds):", time.as_secs());
 
         let mut sorted: Vec<_> = moves.iter().collect();
@@ -49,7 +54,15 @@ impl IO {
 
         let width = (sorted.len() as f32).log10().floor() as usize + 1;
         for (i, (mv, eval)) in sorted.iter().enumerate() {
-            println!("{:width$}: {:12} | {:+05.1}", i, mv, eval);
+            println!(
+                "{:width$}: {:12} | {:+05.1}",
+                i,
+                match mv {
+                    Move::Pos(a) => Move::Coords(root.to_coords(*a)),
+                    a => *a,
+                },
+                eval
+            );
         }
     }
 

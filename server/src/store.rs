@@ -4,38 +4,35 @@ use std::{
     sync::{LazyLock, Mutex},
 };
 
-use board::BoardData;
-use evaluation::session::Session;
+use board::{Board, BoardData};
 
 use crate::requests::SessionIdentifier;
 
 static CURRENT_ID: LazyLock<Mutex<usize>> = LazyLock::new(|| Mutex::new(0));
-static USE_CACHE: bool = true;
-static MAX_DEPTH: u8 = 5;
 
 #[derive(Clone)]
-pub struct SessionData {
+pub struct Session {
     pub session_id: usize,
-    pub game_session: Session,
+    pub board: Board,
 }
 
-impl SessionData {
+impl Session {
     pub fn new(data: &BoardData) -> Result<Self, String> {
         let mut handle = CURRENT_ID.lock().unwrap();
         handle.add_assign(1);
         let id = handle.clone();
 
-        let session = Session::new(data, USE_CACHE, MAX_DEPTH)?;
+        let board = Board::from(data)?;
 
         Ok(Self {
             session_id: id,
-            game_session: session,
+            board,
         })
     }
 }
 
 pub struct SessionStore {
-    pub sessions: Mutex<HashMap<usize, SessionData>>,
+    pub sessions: Mutex<HashMap<usize, Session>>,
 }
 
 impl SessionStore {
@@ -45,7 +42,7 @@ impl SessionStore {
         }
     }
 
-    pub fn get_session(&self, id: &usize) -> Result<SessionData, String> {
+    pub fn get_session(&self, id: &usize) -> Result<Session, String> {
         let handle = self.sessions.lock().unwrap();
         let value = handle.get(id);
         match value {
@@ -55,11 +52,11 @@ impl SessionStore {
     }
 
     pub fn create_new_session(&self, data: &BoardData) -> Result<SessionIdentifier, String> {
-        let session_data = SessionData::new(data)?;
-        let id = session_data.session_id;
+        let session = Session::new(data)?;
+        let id = session.session_id;
 
         let mut handle = self.sessions.lock().unwrap();
-        handle.insert(session_data.session_id, session_data);
+        handle.insert(session.session_id, session);
 
         Ok(SessionIdentifier { session_id: id })
     }

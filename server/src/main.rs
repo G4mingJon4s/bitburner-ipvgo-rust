@@ -1,6 +1,6 @@
 use requests::{
-    SessionCreateData, SessionIdentifier, SessionListData, SessionMoveRequest, SessionMoveResponse,
-    SessionStateData,
+    SessionBoardState, SessionCreateData, SessionIdentifier, SessionListData, SessionMoveRequest,
+    SessionMoveResponse,
 };
 use rocket::{
     fairing::{Fairing, Info, Kind},
@@ -53,10 +53,10 @@ fn index() -> RawHtml<&'static str> {
 fn get_session_state(
     id: usize,
     store: &State<SessionStore>,
-) -> Result<Json<SessionStateData>, Status> {
+) -> Result<Json<SessionBoardState>, Status> {
     let session = store.get_session(&id);
     match session {
-        Ok(s) => Ok(Json(SessionStateData::new(&s.game_session))),
+        Ok(s) => Ok(Json(SessionBoardState::new(&s.board))),
         Err(_) => Err(Status::NotFound),
     }
 }
@@ -72,11 +72,11 @@ fn put_session_move(
 
     match session {
         Ok(mut s) => {
-            let result = s.game_session.make_move(mv);
+            let result = s.board.make_move_mut(mv);
             match result {
                 Ok(_) => Ok(Json(SessionMoveResponse::new(
                     mv,
-                    SessionStateData::new(&s.game_session),
+                    SessionBoardState::new(&s.board),
                 ))),
                 Err(_) => return Err(Status::NotAcceptable),
             }

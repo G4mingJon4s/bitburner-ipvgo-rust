@@ -6,4 +6,5 @@ edition.workspace = true
 [dependencies]
 board = { path = "../board" }
 evaluation = { path = "../evaluation" }
+rayon = "1.10.0"
 rocket = { version = "0.5.1", features = ["json"] }

@@ -1,10 +1,12 @@
 use std::{
     collections::HashMap,
     ops::AddAssign,
-    sync::{LazyLock, Mutex},
+    sync::{Arc, LazyLock, Mutex},
+    time::Duration,
 };
 
-use board::{Board, BoardData};
+use board::{util::Move, Board, BoardData};
+use evaluation::Evaluator;
 
 use crate::requests::SessionIdentifier;
 
@@ -14,6 +16,7 @@ static CURRENT_ID: LazyLock<Mutex<usize>> = LazyLock::new(|| Mutex::new(0));
 pub struct Session {
     pub session_id: usize,
     pub board: Board,
+    pub evaluation_cache: Option<(Duration, Vec<(Move, f32)>)>,
 }
 
 impl Session {
@@ -27,18 +30,31 @@ impl Session {
         Ok(Self {
             session_id: id,
             board,
+            evaluation_cache: None,
         })
+    }
+}
+
+impl Session {
+    pub fn make_move(&mut self, mv: Move) -> Result<(), String> {
+        self.board.make_move_mut(mv)?;
+        self.evaluation_cache = None;
+        Ok(())
     }
 }
 
 pub struct SessionStore {
     pub sessions: Mutex<HashMap<usize, Session>>,
+    pub evaluator: Arc<Mutex<Evaluator>>,
+    pub depth: u8,
 }
 
 impl SessionStore {
     pub fn new() -> Self {
         Self {
             sessions: Mutex::new(HashMap::new()),
+            evaluator: Arc::new(Mutex::new(Evaluator::new(true))),
+            depth: 6,
         }
     }
 
@@ -49,6 +65,11 @@ impl SessionStore {
             Some(v) => Ok(v.clone()),
             None => Err(String::from("The specified session does not exist")),
         }
+    }
+
+    pub fn update_session(&self, id: usize, session: Session) {
+        let mut handle = self.sessions.lock().unwrap();
+        handle.insert(id, session);
     }
 
     pub fn create_new_session(&self, data: &BoardData) -> Result<SessionIdentifier, String> {

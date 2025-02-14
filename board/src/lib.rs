@@ -255,6 +255,18 @@ impl Board {
         (pos / self.size as usize, pos % self.size as usize)
     }
 
+    fn overwrite(&mut self, b: Board) {
+        self.white = b.white;
+        self.black = b.black;
+        self.dead = b.dead;
+
+        self.turn = b.turn;
+        self.size = b.size;
+        self.komi = b.komi;
+        self.neighbors = b.neighbors;
+        self.prev = b.prev;
+    }
+
     fn pass(&self) -> Board {
         let mut new_board = self.clone();
 
@@ -272,7 +284,7 @@ impl Board {
 
     pub fn make_move_mut(&mut self, mv: Move) -> Result<(), String> {
         let new_board = self.make_move(mv)?;
-        *self = new_board;
+        self.overwrite(new_board);
         Ok(())
     }
 

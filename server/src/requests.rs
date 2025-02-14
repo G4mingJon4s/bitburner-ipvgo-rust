@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use board::{
     util::{Move, Turn},
     Board, BoardData,
@@ -77,4 +79,24 @@ impl SessionMoveResponse {
 #[serde(crate = "rocket::serde")]
 pub struct SessionListData {
     pub sessions: Vec<usize>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(crate = "rocket::serde")]
+pub struct SessionEvaluationData {
+    pub time: Duration,
+    pub moves: Vec<(Move, SessionBoardState, f32)>,
+}
+
+impl SessionEvaluationData {
+    pub fn new(data: (Duration, Vec<(Move, Board, f32)>)) -> Self {
+        Self {
+            time: data.0,
+            moves: data
+                .1
+                .iter()
+                .map(|(m, b, e)| (*m, SessionBoardState::new(b), *e))
+                .collect::<Vec<_>>(),
+        }
+    }
 }

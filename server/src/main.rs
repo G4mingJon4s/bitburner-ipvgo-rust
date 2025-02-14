@@ -108,7 +108,7 @@ async fn get_session_evaluation(
     let mapped_eval = moves.iter().map(|(m, e)| {
         (
             match *m {
-                Move::Pos(a) => Move::Coords((&board).to_coords(a)),
+                Move::Pos(a) => Move::Coords(Board::to_coords(a, board.size)),
                 a => a,
             },
             (&board).make_move(*m),

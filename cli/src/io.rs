@@ -58,7 +58,7 @@ impl IO {
                 "{:width$}: {:12} | {:+05.1}",
                 i,
                 match mv {
-                    Move::Pos(a) => Move::Coords(root.to_coords(*a)),
+                    Move::Pos(a) => Move::Coords(Board::to_coords(*a, root.size)),
                     a => *a,
                 },
                 eval

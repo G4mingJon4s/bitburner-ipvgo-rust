@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 use std::fmt::Debug;
 use std::hash::{DefaultHasher, Hash, Hasher};
+use std::sync::{LazyLock, Mutex};
 use std::{collections::HashSet, iter};
 
 use crate::util::{ChainData, Chains, Move, PreviousData, Tile, Turn};
@@ -38,6 +39,57 @@ impl BoardData {
     }
 }
 
+const NEIGHBORS: LazyLock<Mutex<Vec<(u8, Vec<[usize; 4]>)>>> =
+    LazyLock::new(|| Mutex::new(Vec::new()));
+
+pub struct Neighbors;
+impl Neighbors {
+    pub fn get_neighbors(size: u8, pos: &usize) -> [usize; 4] {
+        let neighbor_collection = NEIGHBORS;
+        let mut handle = neighbor_collection.lock().unwrap();
+        if handle.iter().all(|a| a.0 != size) {
+            handle.push((
+                size,
+                (0..((size as usize).pow(2)))
+                    .map(|pos| {
+                        let (x, y) = Board::to_coords(pos, size);
+                        let mut nbrs = [0; 4];
+                        let mut count = 0;
+
+                        if x > 0 {
+                            nbrs[count] = Board::to_pos(x - 1, y, size);
+                            count += 1;
+                        }
+                        if x + 1 < size as usize {
+                            nbrs[count] = Board::to_pos(x + 1, y, size);
+                            count += 1;
+                        }
+                        if y > 0 {
+                            nbrs[count] = Board::to_pos(x, y - 1, size);
+                            count += 1;
+                        }
+                        if y + 1 < size as usize {
+                            nbrs[count] = Board::to_pos(x, y + 1, size);
+                            count += 1;
+                        }
+
+                        // Pad with a default value if fewer than 4 neighbors
+                        while count < 4 {
+                            nbrs[count] = usize::MAX; // Or some other invalid value
+                            count += 1;
+                        }
+
+                        nbrs
+                    })
+                    .collect(),
+            ));
+        }
+
+        let neighbors = handle.iter().find(|a| a.0 == size).unwrap();
+        neighbors.1[*pos]
+    }
+}
+
 pub struct Board {
     pub white: Vec<u32>,
     pub black: Vec<u32>,
@@ -48,8 +100,6 @@ pub struct Board {
 
     pub komi: f32,
     pub prev: Vec<PreviousData>,
-
-    neighbors: Vec<[usize; 4]>,
 }
 
 impl Debug for Board {
@@ -77,8 +127,6 @@ impl Clone for Board {
             komi: self.komi,
             size: self.size,
             turn: self.turn,
-
-            neighbors: self.neighbors.clone(),
         }
     }
 }
@@ -124,7 +172,7 @@ impl Chains for Board {
             }
             tiles.insert(cur);
 
-            for p in self.neighbors[cur] {
+            for p in Neighbors::get_neighbors(self.size, &pos) {
                 if p == usize::MAX {
                     continue;
                 }
@@ -159,9 +207,7 @@ impl Board {
         let black = vec![0; sets_of_32];
         let dead = vec![0; sets_of_32];
 
-        let neighbors: Vec<[usize; 4]> = Vec::new();
-
-        let mut board = Self {
+        Self {
             white,
             black,
             dead,
@@ -169,44 +215,7 @@ impl Board {
             turn,
             komi,
             prev: Vec::new(),
-
-            neighbors,
-        };
-
-        board.neighbors = (0..((size as usize).pow(2)))
-            .map(|pos| {
-                let (x, y) = board.to_coords(pos);
-                let mut nbrs = [0; 4];
-                let mut count = 0;
-
-                if x > 0 {
-                    nbrs[count] = board.to_pos(x - 1, y);
-                    count += 1;
-                }
-                if x + 1 < size as usize {
-                    nbrs[count] = board.to_pos(x + 1, y);
-                    count += 1;
-                }
-                if y > 0 {
-                    nbrs[count] = board.to_pos(x, y - 1);
-                    count += 1;
-                }
-                if y + 1 < size as usize {
-                    nbrs[count] = board.to_pos(x, y + 1);
-                    count += 1;
-                }
-
-                // Pad with a default value if fewer than 4 neighbors
-                while count < 4 {
-                    nbrs[count] = usize::MAX; // Or some other invalid value
-                    count += 1;
-                }
-
-                nbrs
-            })
-            .collect();
-
-        board
+        }
     }
 
     pub fn get_hash(&self) -> u64 {
@@ -247,12 +256,12 @@ impl Board {
         }
     }
 
-    pub fn to_pos(&self, x: usize, y: usize) -> usize {
-        (x * self.size as usize) + y
+    pub fn to_pos(x: usize, y: usize, size: u8) -> usize {
+        (x * size as usize) + y
     }
 
-    pub fn to_coords(&self, pos: usize) -> (usize, usize) {
-        (pos / self.size as usize, pos % self.size as usize)
+    pub fn to_coords(pos: usize, size: u8) -> (usize, usize) {
+        (pos / size as usize, pos % size as usize)
     }
 
     fn overwrite(&mut self, b: Board) {
@@ -263,7 +272,6 @@ impl Board {
         self.turn = b.turn;
         self.size = b.size;
         self.komi = b.komi;
-        self.neighbors = b.neighbors;
         self.prev = b.prev;
     }
 
@@ -293,7 +301,7 @@ impl Board {
             return Ok(self.pass());
         }
         let pos = match mv {
-            Move::Coords((x, y)) => self.to_pos(x, y),
+            Move::Coords((x, y)) => Board::to_pos(x, y, self.size),
             Move::Pos(p) => p,
             _ => panic!("Not possible"),
         };
@@ -314,7 +322,7 @@ impl Board {
 
         let next_tile: Tile = new_board.turn.try_into()?;
 
-        for aff in self.neighbors[pos] {
+        for aff in Neighbors::get_neighbors(self.size, &pos) {
             if aff == usize::MAX {
                 continue;
             }
@@ -376,7 +384,7 @@ impl Board {
         let mut s = String::with_capacity(capacity);
         for x in 0..size {
             for y in 0..size {
-                s.push(self.tile(self.to_pos(x, y)).into());
+                s.push(self.tile(Board::to_pos(x, y, self.size)).into());
             }
             if x < size - 1 {
                 s.push('\n');

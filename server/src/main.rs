@@ -70,7 +70,10 @@ fn put_session_move(
     let mut session = store.get_session(&id).map_err(|_| Status::NotFound)?;
     let mv = data.into_inner().mv;
 
-    session.make_move(mv).map_err(|_| Status::NotAcceptable)?;
+    session.make_move(mv).map_err(|e| {
+        println!("Move provided is not valid: {}", e);
+        Status::NotAcceptable
+    })?;
     store.update_session(id, session.clone());
 
     Ok(Json(SessionMoveResponse::new(

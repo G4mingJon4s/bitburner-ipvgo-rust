@@ -1,6 +1,6 @@
 use rayon::prelude::*;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -35,17 +35,29 @@ pub struct TranspositionEntry {
 
 #[derive(Default)]
 pub struct TranspositionTable {
+    capacity: usize,
     entries: HashMap<u64, TranspositionEntry>,
+    inserted: VecDeque<u64>,
 }
 
 impl TranspositionTable {
-    pub fn new() -> Self {
+    pub fn new(capacity: usize) -> Self {
         Self {
-            entries: HashMap::new(),
+            capacity,
+            entries: HashMap::with_capacity(capacity),
+            inserted: VecDeque::with_capacity(capacity),
         }
     }
 
-    pub fn get(&self, key: u64, depth: u8) -> Option<TranspositionEntry> {
+    pub fn capacity_from_ram(ram: usize) -> usize {
+        ram / (32 + size_of::<TranspositionEntry>())
+    }
+
+    pub fn get(&mut self, key: u64, depth: u8) -> Option<TranspositionEntry> {
+        if *self.inserted.front().unwrap_or(&u64::MAX) == key {
+            self.inserted.pop_front();
+            self.inserted.push_back(key);
+        }
         self.entries.get(&key).and_then(|entry| {
             if entry.depth >= depth {
                 Some(*entry)
@@ -56,7 +68,17 @@ impl TranspositionTable {
     }
 
     pub fn insert(&mut self, key: u64, entry: TranspositionEntry) {
+        if self.entries.len() >= self.capacity {
+            let removal = self.inserted.pop_front().unwrap();
+            self.entries.remove(&removal);
+        }
+
         self.entries.insert(key, entry);
+        self.inserted.push_back(key);
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
     }
 }
 
@@ -67,13 +89,17 @@ pub struct Evaluator {
 }
 
 impl Evaluator {
-    pub fn new(use_cache: bool) -> Self {
+    pub fn new(use_cache: bool, capacity: usize) -> Self {
         let table = if use_cache {
-            Some(Arc::new(Mutex::new(TranspositionTable::new())))
+            Some(Arc::new(Mutex::new(TranspositionTable::new(capacity))))
         } else {
             None
         };
         Self { table }
+    }
+
+    pub fn stored_states(&self) -> usize {
+        self.table.clone().map_or(0, |t| t.lock().unwrap().len())
     }
 
     pub fn evaluate<T: Heuristic>(&self, root: &T, depth: u8) -> f32 {
@@ -94,7 +120,7 @@ impl Evaluator {
         let key = node.hash();
 
         if let Some(ref table) = self.table {
-            if let Ok(table) = table.lock() {
+            if let Ok(mut table) = table.lock() {
                 if let Some(entry) = table.get(key, depth) {
                     match entry.bound {
                         Bound::Exact => return entry.value,

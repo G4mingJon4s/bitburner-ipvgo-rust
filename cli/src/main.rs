@@ -7,7 +7,7 @@ use std::{
 
 use board::Board;
 use clap::Parser;
-use evaluation::{Evaluator, Heuristic};
+use evaluation::{Evaluator, Heuristic, TranspositionTable};
 use io::IO;
 
 mod io;
@@ -50,7 +50,10 @@ fn main() {
         .expect("Thread pool error");
 
     let sin = stdin();
-    let evaluator = Evaluator::new(!args.no_cache);
+    let evaluator = Evaluator::new(
+        !args.no_cache,
+        TranspositionTable::capacity_from_ram(1024 * 1024 * 500),
+    );
 
     let state = IO::read_state(&sin);
     if let Err(e) = state {
@@ -83,5 +86,8 @@ fn main() {
         IO::press_enter_continue(&sin);
     }
 
-    println!("The game is over");
+    println!(
+        "The game is over. Total cached states: {}",
+        evaluator.stored_states()
+    );
 }

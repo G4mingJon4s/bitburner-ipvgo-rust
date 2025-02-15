@@ -172,7 +172,7 @@ impl Chains for Board {
             }
             tiles.insert(cur);
 
-            for p in Neighbors::get_neighbors(self.size, &pos) {
+            for p in Neighbors::get_neighbors(self.size, &cur) {
                 if p == usize::MAX {
                     continue;
                 }

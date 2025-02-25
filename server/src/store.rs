@@ -5,7 +5,7 @@ use std::{
     time::Duration,
 };
 
-use board::{util::Move, Board, BoardData};
+use board::{Board, Move, Turn};
 use evaluation::{Evaluator, TranspositionTable};
 
 use crate::requests::SessionIdentifier;
@@ -19,13 +19,20 @@ pub struct Session {
     pub evaluation_cache: Option<(Duration, Vec<(Move, f32)>)>,
 }
 
+pub struct BoardData {
+    pub rep: String,
+    pub size: u8,
+    pub turn: Turn,
+    pub komi: f32,
+}
+
 impl Session {
     pub fn new(data: &BoardData) -> Result<Self, String> {
         let mut handle = CURRENT_ID.lock().unwrap();
         handle.add_assign(1);
         let id = handle.clone();
 
-        let board = Board::from(data)?;
+        let board = Board::from_rep(data.rep.clone(), data.size, data.turn, data.komi)?;
 
         Ok(Self {
             session_id: id,
@@ -36,8 +43,14 @@ impl Session {
 }
 
 impl Session {
-    pub fn make_move(&mut self, mv: Move) -> Result<(), String> {
-        self.board.make_move_mut(mv)?;
+    pub fn apply_move(&mut self, mv: Move) -> Result<(), String> {
+        self.board.apply_move(mv)?;
+        self.evaluation_cache = None;
+        Ok(())
+    }
+
+    pub fn undo_move(&mut self) -> Result<(), String> {
+        self.board.undo_move()?;
         self.evaluation_cache = None;
         Ok(())
     }

@@ -1,4 +1,5 @@
 use std::{
+    env,
     io::stdin,
     thread::{self, available_parallelism},
     time::Duration,
@@ -8,7 +9,7 @@ use std::{
 use board::Board;
 use clap::Parser;
 use evaluation::{Evaluator, Heuristic, TranspositionTable};
-use io::IO;
+use io::{Action, IO};
 
 mod io;
 
@@ -24,7 +25,8 @@ struct Args {
     no_cache: bool,
 }
 
-fn main() {
+fn main() -> Result<(), String> {
+    env::set_var("RUST_BACKTRACE", "1");
     let args = Args::parse();
     let depth = args.depth;
     let threads = args.threads;
@@ -55,34 +57,40 @@ fn main() {
         TranspositionTable::capacity_from_ram(1024 * 1024 * 500),
     );
 
-    let state = IO::read_state(&sin);
-    if let Err(e) = state {
-        eprintln!("Error: {}", e);
-        return;
-    }
+    let (rep, size, turn, komi) = IO::read_state(&sin)?;
 
-    let mut board = Board::from(&state.unwrap()).expect("Could not instantiate session");
+    let mut board = Board::from_rep(rep, size, turn, komi)?;
 
     while !board.is_terminal() {
+        IO::print_result(&board);
+
         let (time, move_evaluation) = board.evaluate(&evaluator, depth);
         IO::print_move_evalutations(&board, move_evaluation, board.is_maximizing(), time);
 
-        let mv = IO::read_move(&sin);
-        if let Err(e) = mv {
+        let action = IO::read_action(&sin, &board);
+        if let Err(e) = action {
             eprintln!("Error: {}", e);
             thread::sleep(Duration::from_millis(2000));
             continue;
         }
 
-        let parsed_move = mv.unwrap();
-        let new_board = board.make_move_mut(parsed_move);
-        if let Err(e) = new_board {
-            eprintln!("Error: {}", e);
-            thread::sleep(Duration::from_millis(2000));
-            continue;
+        match action.unwrap() {
+            Action::Mv(mv) => {
+                if let Err(e) = board.apply_move(mv) {
+                    eprintln!("Error: {}", e);
+                    thread::sleep(Duration::from_millis(2000));
+                    continue;
+                }
+            }
+            Action::Undo => {
+                if let Err(e) = board.undo_move() {
+                    eprintln!("Error: {}", e);
+                    thread::sleep(Duration::from_millis(2000));
+                    continue;
+                }
+            }
         }
 
-        IO::print_result(parsed_move, &board);
         IO::press_enter_continue(&sin);
     }
 
@@ -90,4 +98,6 @@ fn main() {
         "The game is over. Total cached states: {}",
         evaluator.stored_states()
     );
+
+    Ok(())
 }

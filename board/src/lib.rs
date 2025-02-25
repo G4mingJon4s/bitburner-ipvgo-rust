@@ -1,395 +1,612 @@
-use std::collections::VecDeque;
-use std::fmt::Debug;
-use std::hash::{DefaultHasher, Hash, Hasher};
-use std::sync::{LazyLock, Mutex};
-use std::{collections::HashSet, iter};
+use std::collections::hash_map::DefaultHasher;
+use std::collections::{HashSet, VecDeque};
+use std::hash::{Hash, Hasher};
+use std::usize;
 
-use crate::util::{ChainData, Chains, Move, PreviousData, Tile, Turn};
+use serde::{Deserialize, Serialize};
 
-pub mod util;
-
-pub struct BoardData {
-    pub komi: f32,
-    pub turn: Turn,
-    pub rep: String,
-    pub size: u8,
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum Tile {
+    White,
+    Black,
+    Dead,
+    Free,
 }
-
-impl BoardData {
-    pub fn from(s: String) -> Result<Self, String> {
-        let parts: Vec<_> = s.trim().split(";").map(|s| s.to_string()).collect();
-        if parts.len() != 4 {
-            return Err("Missing information".to_string());
+impl Tile {
+    pub fn to_char(&self) -> char {
+        match self {
+            Tile::White => 'O',
+            Tile::Black => 'X',
+            Tile::Dead => '#',
+            Tile::Free => '.',
         }
+    }
 
-        let turn_char = parts[0]
-            .chars()
-            .nth(0)
-            .ok_or("Invalid turn char".to_string())?;
-        let turn = Turn::try_from(turn_char)?;
-        let size = parts[1].parse::<u8>().map_err(|e| e.to_string())?;
-        let rep = parts[2].clone();
-        let komi = parts[3].parse::<f32>().map_err(|e| e.to_string())?;
-        Ok(BoardData {
-            komi,
-            size,
-            turn,
-            rep,
-        })
+    pub fn from_char(c: char) -> Option<Self> {
+        match c {
+            'O' => Some(Tile::White),
+            'X' => Some(Tile::Black),
+            '#' => Some(Tile::Dead),
+            '.' => Some(Tile::Free),
+            _ => None,
+        }
     }
 }
 
-const NEIGHBORS: LazyLock<Mutex<Vec<(u8, Vec<[usize; 4]>)>>> =
-    LazyLock::new(|| Mutex::new(Vec::new()));
-
-pub struct Neighbors;
-impl Neighbors {
-    pub fn get_neighbors(size: u8, pos: &usize) -> [usize; 4] {
-        let neighbor_collection = NEIGHBORS;
-        let mut handle = neighbor_collection.lock().unwrap();
-        if handle.iter().all(|a| a.0 != size) {
-            handle.push((
-                size,
-                (0..((size as usize).pow(2)))
-                    .map(|pos| {
-                        let (x, y) = Board::to_coords(pos, size);
-                        let mut nbrs = [0; 4];
-                        let mut count = 0;
-
-                        if x > 0 {
-                            nbrs[count] = Board::to_pos(x - 1, y, size);
-                            count += 1;
-                        }
-                        if x + 1 < size as usize {
-                            nbrs[count] = Board::to_pos(x + 1, y, size);
-                            count += 1;
-                        }
-                        if y > 0 {
-                            nbrs[count] = Board::to_pos(x, y - 1, size);
-                            count += 1;
-                        }
-                        if y + 1 < size as usize {
-                            nbrs[count] = Board::to_pos(x, y + 1, size);
-                            count += 1;
-                        }
-
-                        // Pad with a default value if fewer than 4 neighbors
-                        while count < 4 {
-                            nbrs[count] = usize::MAX; // Or some other invalid value
-                            count += 1;
-                        }
-
-                        nbrs
-                    })
-                    .collect(),
-            ));
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Turn {
+    White,
+    Black,
+    None,
+}
+impl Turn {
+    pub fn to_str(&self) -> &'static str {
+        match self {
+            Turn::White => "White",
+            Turn::Black => "Black",
+            Turn::None => "None",
         }
-
-        let neighbors = handle.iter().find(|a| a.0 == size).unwrap();
-        neighbors.1[*pos]
     }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.to_lowercase().trim() {
+            "white" => Some(Turn::White),
+            "black" => Some(Turn::Black),
+            "none" => Some(Turn::None),
+            _ => None,
+        }
+    }
+}
+
+impl Turn {
+    pub fn next(self) -> Turn {
+        match self {
+            Turn::White => Turn::Black,
+            Turn::Black => Turn::White,
+            Turn::None => Turn::None,
+        }
+    }
+
+    pub fn get_placing_color(self) -> Option<Tile> {
+        match self {
+            Turn::Black => Some(Tile::Black),
+            Turn::White => Some(Tile::White),
+            Turn::None => None,
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Move {
+    Place(usize),
+    Coords((usize, usize)),
+    Pass,
+}
+
+#[derive(Clone, Debug)]
+pub struct Chain {
+    pub id: usize,
+    pub tile: Tile,
+    pub positions: HashSet<usize>,
+    pub liberties: HashSet<usize>,
+    pub adjacent: HashSet<usize>,
+}
+
+#[derive(Clone, Debug)]
+pub enum Mod {
+    Assignment((usize, usize)),
+    Addition(usize),
+    Change((usize, Chain)),
+}
+
+#[derive(Clone, Debug)]
+pub struct MoveChange {
+    pub action: Move,
+    pub previous_turn: Turn,
+    pub board_hash: u64,
+
+    pub mods: Vec<Mod>,
 }
 
 pub struct Board {
-    pub white: Vec<u32>,
-    pub black: Vec<u32>,
-    pub dead: Vec<u32>,
-
     pub size: u8,
-    pub turn: Turn,
-
     pub komi: f32,
-    pub prev: Vec<PreviousData>,
+    pub turn: Turn,
+    pub pos_to_chain: Vec<Option<usize>>,
+    pub chains: Vec<Option<Chain>>,
+    pub history: Vec<MoveChange>,
 }
 
-impl Debug for Board {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Board({:?},{},{},{},{})",
-            self.turn,
-            self.size,
-            self.white.as_ptr() as u32,
-            self.black.as_ptr() as u32,
-            self.dead.as_ptr() as u32,
-        )
+impl Hash for Board {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        for p in 0..self.pos_to_chain.len() {
+            let t = self.get_tile(p);
+            t.hash(state);
+        }
     }
 }
 
 impl Clone for Board {
     fn clone(&self) -> Self {
         Self {
-            white: self.white.clone(),
-            black: self.black.clone(),
-            dead: self.dead.clone(),
-            prev: self.prev.clone(),
-
-            komi: self.komi,
             size: self.size,
+            komi: self.komi,
             turn: self.turn,
-        }
-    }
-}
-
-impl Hash for Board {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.white.hash(state);
-        self.black.hash(state);
-        self.dead.hash(state);
-    }
-}
-
-impl PartialEq for Board {
-    fn eq(&self, other: &Self) -> bool {
-        self.white.iter().eq(other.white.iter())
-            && self.black.iter().eq(other.black.iter())
-            && self.dead.iter().eq(other.dead.iter())
-    }
-
-    fn ne(&self, other: &Self) -> bool {
-        !(self == other)
-    }
-}
-
-impl Into<String> for Board {
-    fn into(self) -> String {
-        self.get_board_state()
-    }
-}
-
-impl Chains for Board {
-    fn get_chain(&self, pos: usize) -> ChainData {
-        let tile = self.tile(pos);
-
-        let mut tiles: HashSet<usize> = HashSet::new();
-        let mut adjacent: HashSet<usize> = HashSet::new();
-        let mut liberties: HashSet<usize> = HashSet::new();
-        let mut queue = VecDeque::from([pos]);
-
-        while let Some(cur) = queue.pop_front() {
-            if tiles.contains(&cur) {
-                continue;
-            }
-            tiles.insert(cur);
-
-            for p in Neighbors::get_neighbors(self.size, &cur) {
-                if p == usize::MAX {
-                    continue;
-                }
-                let t = self.tile(p);
-                if t == tile {
-                    queue.push_back(p);
-                    continue;
-                }
-
-                if t == Tile::Free && tile != Tile::Dead {
-                    liberties.insert(p);
-                }
-
-                adjacent.insert(p);
-            }
-        }
-
-        ChainData {
-            tile,
-            tiles: tiles.iter().map(|p| *p).collect::<Vec<_>>(),
-            adjacent: adjacent.iter().map(|p| *p).collect::<Vec<_>>(),
-            liberties: liberties.iter().map(|p| *p).collect::<Vec<_>>(),
+            chains: self.chains.clone(),
+            history: self.history.clone(),
+            pos_to_chain: self.pos_to_chain.clone(),
         }
     }
 }
 
 impl Board {
-    pub fn new(size: u8, turn: Turn, komi: f32) -> Self {
-        let sets_of_32 = (size as usize).pow(2).div_ceil(32).max(1);
-
-        let white = vec![0; sets_of_32];
-        let black = vec![0; sets_of_32];
-        let dead = vec![0; sets_of_32];
-
+    pub fn new(size: u8, starting_turn: Turn, komi: f32) -> Self {
+        let total = (size as usize).pow(2);
         Self {
-            white,
-            black,
-            dead,
             size,
-            turn,
             komi,
-            prev: Vec::new(),
+            turn: starting_turn,
+            pos_to_chain: vec![None; total],
+            chains: Vec::new(),
+            history: Vec::new(),
         }
     }
 
-    pub fn get_hash(&self) -> u64 {
-        let mut s = DefaultHasher::new();
-        self.hash(&mut s);
-        s.finish()
+    pub fn to_coords(&self, pos: usize) -> (usize, usize) {
+        (pos / self.size as usize, pos % self.size as usize)
     }
 
-    fn to_index(pos: usize) -> (usize, usize) {
-        (pos / 32, pos % 32)
+    pub fn to_pos(&self, x: usize, y: usize) -> usize {
+        x * self.size as usize + y
     }
 
-    pub fn tile(&self, pos: usize) -> Tile {
-        let (idx, ofs) = Self::to_index(pos);
-        let mask = 1 << ofs;
+    fn neighbors(&self, pos: usize) -> Vec<usize> {
+        let (x, y) = self.to_coords(pos);
+        let mut nbrs = Vec::new();
+        if x > 0 {
+            nbrs.push(self.to_pos(x - 1, y));
+        }
+        if x + 1 < self.size as usize {
+            nbrs.push(self.to_pos(x + 1, y));
+        }
+        if y > 0 {
+            nbrs.push(self.to_pos(x, y - 1));
+        }
+        if y + 1 < self.size as usize {
+            nbrs.push(self.to_pos(x, y + 1));
+        }
+        nbrs
+    }
 
-        match () {
-            _ if self.white[idx] & mask != 0 => Tile::White,
-            _ if self.black[idx] & mask != 0 => Tile::Black,
-            _ if self.dead[idx] & mask != 0 => Tile::Dead,
-            _ => Tile::Free,
+    pub fn compute_board_hash(&self) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        self.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    pub fn get_tile(&self, pos: usize) -> Tile {
+        match self.pos_to_chain[pos] {
+            None => Tile::Dead,
+            Some(id) => self.chains[id].as_ref().unwrap().tile,
         }
     }
 
-    fn set_tile(&mut self, pos: usize, tile: Tile) {
-        let (idx, ofs) = Self::to_index(pos);
-        let mask = 1 << ofs;
+    fn floodfill<F: Fn(usize) -> Tile, N: Fn(usize) -> Vec<usize>>(
+        tile: F,
+        neighbors: N,
+        pos: usize,
+        id: usize,
+    ) -> Chain {
+        let c = tile(pos);
 
-        self.white[idx] &= !mask;
-        self.black[idx] &= !mask;
-        self.dead[idx] &= !mask;
-
-        match tile {
-            Tile::White => self.white[idx] |= mask,
-            Tile::Black => self.black[idx] |= mask,
-            Tile::Dead => self.dead[idx] |= mask,
-            _ => (),
-        }
-    }
-
-    pub fn to_pos(x: usize, y: usize, size: u8) -> usize {
-        (x * size as usize) + y
-    }
-
-    pub fn to_coords(pos: usize, size: u8) -> (usize, usize) {
-        (pos / size as usize, pos % size as usize)
-    }
-
-    fn overwrite(&mut self, b: Board) {
-        self.white = b.white;
-        self.black = b.black;
-        self.dead = b.dead;
-
-        self.turn = b.turn;
-        self.size = b.size;
-        self.komi = b.komi;
-        self.prev = b.prev;
-    }
-
-    fn pass(&self) -> Board {
-        let mut new_board = self.clone();
-
-        let new_turn = match self.prev.last() {
-            Some(p) if p.mv == Move::Pass => Turn::None,
-            _ => self.turn.next(),
-        };
-        new_board.turn = new_turn;
-        new_board.prev.push(PreviousData {
-            board: self.get_hash(),
-            mv: Move::Pass,
-        });
-        new_board
-    }
-
-    pub fn make_move_mut(&mut self, mv: Move) -> Result<(), String> {
-        let new_board = self.make_move(mv)?;
-        self.overwrite(new_board);
-        Ok(())
-    }
-
-    pub fn make_move(&self, mv: Move) -> Result<Board, String> {
-        if mv == Move::Pass {
-            return Ok(self.pass());
-        }
-        let pos = match mv {
-            Move::Coords((x, y)) => Board::to_pos(x, y, self.size),
-            Move::Pos(p) => p,
-            _ => panic!("Not possible"),
-        };
-
-        if self.tile(pos) != Tile::Free {
-            return Err("Tile is not free".to_string());
-        }
-
-        let tile: Tile = self.turn.try_into()?;
-        let mut new_board = self.clone();
-
-        new_board.set_tile(pos, tile);
-        new_board.turn = self.turn.next();
-        new_board.prev.push(PreviousData {
-            board: self.get_hash(),
-            mv: Move::Pos(pos),
-        });
-
-        let next_tile: Tile = new_board.turn.try_into()?;
-
-        for aff in Neighbors::get_neighbors(self.size, &pos) {
-            if aff == usize::MAX {
+        let mut positions: HashSet<usize> = HashSet::new();
+        let mut adjacent: HashSet<usize> = HashSet::new();
+        let mut liberties: HashSet<usize> = HashSet::new();
+        let mut queue: VecDeque<usize> = VecDeque::new();
+        queue.push_back(pos);
+        while !queue.is_empty() {
+            let cur = queue.pop_front().unwrap();
+            if positions.contains(&cur) {
                 continue;
             }
-            if new_board.tile(aff) != next_tile {
+            positions.insert(cur);
+            for n in neighbors(cur) {
+                let t = tile(n);
+                if t == c {
+                    queue.push_back(n);
+                    continue;
+                }
+                if t == Tile::Free {
+                    liberties.insert(n);
+                }
+                adjacent.insert(n);
+            }
+        }
+
+        Chain {
+            id,
+            tile: c,
+            positions,
+            adjacent,
+            liberties,
+        }
+    }
+
+    pub fn from_rep(rep: String, size: u8, starting_turn: Turn, komi: f32) -> Result<Self, String> {
+        if rep.len() != (size as usize).pow(2) {
+            return Err("Invalid shape".to_string());
+        }
+
+        let mut board = Self::new(size, starting_turn, komi);
+
+        let mut seen: HashSet<usize> = HashSet::new();
+        let mut rep_tiles: Vec<Tile> = Vec::with_capacity((size as usize).pow(2));
+        for t in rep.chars() {
+            let tile = Tile::from_char(t).ok_or_else(|| "Invalid char".to_string())?;
+            rep_tiles.push(tile);
+        }
+
+        for (p, c) in rep_tiles.iter().enumerate() {
+            if seen.contains(&p) {
                 continue;
             }
 
-            let chain = new_board.get_chain(aff);
-            if chain.liberties.len() != 0 {
+            if *c == Tile::Dead {
                 continue;
             }
-            for p in chain.tiles {
-                new_board.set_tile(p, Tile::Free);
+
+            let id = board.chains.len();
+            let new_chain = Board::floodfill(|p| rep_tiles[p], |p| board.neighbors(p), p, id);
+
+            seen.extend(new_chain.positions.iter());
+            for p in new_chain.positions.iter() {
+                board.pos_to_chain[*p] = Some(id);
             }
-        }
 
-        let chain = new_board.get_chain(pos);
-        if chain.liberties.len() == 0 {
-            return Err("You cannot suicide".to_string());
-        }
-
-        let cur_hash = new_board.get_hash();
-        if new_board.prev.iter().any(|p| p.board == cur_hash) {
-            return Err("Repeating move".to_string());
-        }
-
-        Ok(new_board)
-    }
-
-    pub fn valid_moves(&self) -> impl Iterator<Item = (Move, Board)> + '_ {
-        iter::once((Move::Pass, self.pass())).chain((0..((self.size as usize).pow(2))).filter_map(
-            |p| match self.make_move(Move::Pos(p)) {
-                Ok(board) => Some((Move::Pos(p), board)),
-                Err(_) => None,
-            },
-        ))
-    }
-
-    pub fn from(data: &BoardData) -> Result<Self, String> {
-        let rep = data
-            .rep
-            .replace(" ", "")
-            .replace("\r", "")
-            .replace("\n", "")
-            .replace(":", "");
-        assert_eq!(data.size.pow(2) as usize, rep.len(), "Invalid rep shape");
-
-        let mut board = Board::new(data.size, data.turn, data.komi);
-        for (pos, c) in rep.char_indices() {
-            board.set_tile(pos, Tile::try_from(c)?);
+            board.chains.push(Some(new_chain))
         }
 
         Ok(board)
     }
 
-    pub fn get_board_state(&self) -> String {
-        let size = self.size as usize;
-        let capacity = size * size + (size - 1);
-        let mut s = String::with_capacity(capacity);
-        for x in 0..size {
-            for y in 0..size {
-                s.push(self.tile(Board::to_pos(x, y, self.size)).into());
+    pub fn get_rep(&self) -> String {
+        (0..(self.size as usize).pow(2))
+            .map(|p| self.get_tile(p).to_char())
+            .collect()
+    }
+
+    /// Might include moves that are a repetition
+    pub fn valid_moves(&self) -> impl Iterator<Item = Move> + '_ {
+        let mut possible_moves = vec![Move::Pass];
+
+        let friendly_color = self.turn.get_placing_color().unwrap();
+
+        for chain in self.chains.iter().filter_map(|a| a.as_ref()) {
+            if chain.tile != Tile::Free {
+                continue;
             }
-            if x < size - 1 {
-                s.push('\n');
+            if chain.positions.len() >= 2 {
+                possible_moves.extend(chain.positions.iter().map(|&p| Move::Place(p)));
+                continue;
+            }
+
+            let &pos = chain.positions.iter().nth(0).unwrap();
+            let can_place = self
+                .neighbors(pos)
+                .iter()
+                .filter(|&&n| self.pos_to_chain[n].is_some())
+                .any(|&n| {
+                    let (_, n_chain) = self.get_chain(n).unwrap();
+                    if n_chain.tile == friendly_color && n_chain.liberties.len() >= 2 {
+                        return true;
+                    }
+                    n_chain.tile != friendly_color
+                        && n_chain.liberties.len() == 1
+                        && n_chain.liberties.contains(&pos)
+                });
+            if can_place {
+                possible_moves.push(Move::Place(pos));
             }
         }
-        s
+
+        possible_moves.into_iter()
+    }
+
+    fn rollback_change(&mut self, change: MoveChange) {
+        self.turn = change.previous_turn;
+
+        for m in change.mods.into_iter().rev() {
+            match m {
+                Mod::Addition(a) => self.chains.truncate(a),
+                Mod::Assignment((p, o)) => self.pos_to_chain[p] = Some(o),
+                Mod::Change((a, c)) => self.chains[a] = Some(c),
+            }
+        }
+
+        debug_assert_eq!(change.board_hash, self.compute_board_hash());
+    }
+
+    fn get_chain(&self, pos: usize) -> Option<(usize, &Chain)> {
+        if let Some(id) = self.pos_to_chain[pos] {
+            return Some((id, self.chains[id].as_ref().unwrap()));
+        }
+        None
+    }
+
+    fn get_chain_mut(&mut self, pos: usize) -> Option<(usize, &mut Chain)> {
+        if let Some(id) = self.pos_to_chain[pos] {
+            return Some((id, self.chains[id].as_mut().unwrap()));
+        }
+        None
+    }
+
+    pub fn apply_move(&mut self, mut action: Move) -> Result<(), String> {
+        if self.turn == Turn::None {
+            return Err(format!("Game is over ({:?})", action));
+        }
+
+        let mut change = MoveChange {
+            action,
+            previous_turn: self.turn,
+            board_hash: self.compute_board_hash(),
+            mods: Vec::new(),
+        };
+
+        if let Move::Coords((x, y)) = action {
+            action = Move::Place(self.to_pos(x, y));
+        }
+
+        if let Move::Place(pos) = action {
+            if self.get_tile(pos) != Tile::Free {
+                return Err(format!("Tile is occupied ({:?})", action));
+            }
+
+            let neighbors = self
+                .neighbors(pos)
+                .into_iter()
+                .filter(|&p| self.get_tile(p) != Tile::Dead)
+                .collect::<Vec<_>>();
+
+            let friendly_color = self.turn.get_placing_color().unwrap();
+            let opponent_color = self.turn.next().get_placing_color().unwrap();
+
+            let initial_free_neighbors = neighbors
+                .iter()
+                .filter(|&&t| self.get_tile(t) == Tile::Free)
+                .copied()
+                .collect::<Vec<_>>();
+            for &neighbor in neighbors.iter() {
+                if self.get_tile(neighbor) != opponent_color {
+                    continue;
+                }
+
+                let (chain_id, chain) = self.get_chain_mut(neighbor).unwrap();
+                change.mods.push(Mod::Change((chain_id, chain.clone())));
+
+                chain.liberties.remove(&pos);
+                if chain.liberties.len() > 0 {
+                    continue;
+                }
+
+                chain.tile = Tile::Free;
+                let adjacents = chain.adjacent.iter().copied().collect::<Vec<_>>();
+                for adj in adjacents {
+                    if self.pos_to_chain[adj].is_none() {
+                        continue;
+                    }
+                    if adj == pos {
+                        continue;
+                    }
+
+                    let free_neighbors = self
+                        .neighbors(adj)
+                        .into_iter()
+                        .filter(|&p| self.get_tile(p) == Tile::Free)
+                        .collect::<Vec<_>>();
+
+                    let (id, adj_chain) = self.get_chain_mut(adj).unwrap();
+
+                    if id == chain_id {
+                        continue;
+                    }
+
+                    debug_assert!(
+                        adj_chain.tile != Tile::Free,
+                        "No liberties but adj chain is free ({:?} @{:?})",
+                        action,
+                        adj
+                    );
+
+                    change.mods.push(Mod::Change((id, adj_chain.clone())));
+                    adj_chain.liberties.extend(free_neighbors.iter());
+                }
+            }
+
+            let mut friendly_chains: HashSet<usize> = HashSet::new();
+            friendly_chains.extend(
+                neighbors
+                    .iter()
+                    .filter_map(|&n| self.pos_to_chain[n])
+                    .filter(|&id| self.chains[id].as_ref().unwrap().tile == friendly_color),
+            );
+            let free_neighbors = neighbors
+                .iter()
+                .filter(|&&p| self.get_tile(p) == Tile::Free)
+                .copied()
+                .collect::<Vec<_>>();
+            let non_friendly_neighbors = neighbors
+                .iter()
+                .filter(|&&p| self.get_tile(p) != friendly_color)
+                .copied()
+                .collect::<Vec<_>>();
+
+            let pos_id = self.pos_to_chain[pos].unwrap();
+            change.mods.push(Mod::Assignment((pos, pos_id)));
+
+            match friendly_chains.iter().collect::<Vec<_>>().as_slice() {
+                [] => {
+                    let new_id = self.chains.len();
+                    let mut new_chain = Chain {
+                        id: new_id,
+                        tile: friendly_color,
+                        positions: HashSet::new(),
+                        adjacent: HashSet::new(),
+                        liberties: HashSet::new(),
+                    };
+
+                    new_chain.positions.insert(pos);
+                    new_chain.adjacent.extend(neighbors.iter());
+                    new_chain.liberties.extend(free_neighbors.iter());
+
+                    change.mods.push(Mod::Addition(new_id));
+                    self.pos_to_chain[pos] = Some(new_id);
+                    self.chains.push(Some(new_chain));
+                }
+                [&one] => {
+                    let chain = self.chains[one].as_mut().unwrap();
+                    change.mods.push(Mod::Change((one, chain.clone())));
+
+                    chain.liberties.remove(&pos);
+                    chain.adjacent.remove(&pos);
+                    chain.positions.insert(pos);
+                    self.pos_to_chain[pos] = Some(chain.id);
+                    chain.adjacent.extend(non_friendly_neighbors.iter());
+                    chain.liberties.extend(free_neighbors.iter());
+                }
+                many => {
+                    let mut positions: HashSet<usize> = HashSet::new();
+                    let mut adjacents: HashSet<usize> = HashSet::new();
+                    let mut liberties: HashSet<usize> = HashSet::new();
+
+                    for &&other in &many[1..] {
+                        let chain = self.chains[other].as_ref().unwrap();
+                        positions.extend(chain.positions.iter());
+                        adjacents.extend(chain.adjacent.iter());
+                        liberties.extend(chain.liberties.iter());
+
+                        change.mods.push(Mod::Change((other, chain.clone())));
+                        self.chains[other] = None;
+                    }
+
+                    adjacents.extend(non_friendly_neighbors.iter());
+                    liberties.extend(free_neighbors.iter());
+
+                    let survivor = self.chains[*many[0]].as_mut().unwrap();
+                    change.mods.push(Mod::Change((*many[0], survivor.clone())));
+
+                    for &p in positions.iter() {
+                        change
+                            .mods
+                            .push(Mod::Assignment((p, self.pos_to_chain[p].unwrap())));
+                        self.pos_to_chain[p] = Some(survivor.id);
+                    }
+
+                    survivor.positions.extend(positions.iter());
+                    survivor.adjacent.extend(adjacents.iter());
+                    survivor.liberties.extend(liberties.iter());
+
+                    survivor.positions.insert(pos);
+                    survivor.adjacent.remove(&pos);
+                    survivor.liberties.remove(&pos);
+                    self.pos_to_chain[pos] = Some(survivor.id);
+                }
+            }
+
+            let prev_pos_chain = self.chains[pos_id].as_ref().unwrap();
+            change
+                .mods
+                .push(Mod::Change((pos_id, prev_pos_chain.clone())));
+
+            if initial_free_neighbors.len() >= 2 {
+                let flood_filled = neighbors
+                    .iter()
+                    .map(|&n| {
+                        Board::floodfill(|t| self.get_tile(t), |n| self.neighbors(n), n, usize::MAX)
+                    })
+                    .collect::<Vec<_>>();
+
+                self.chains[pos_id] = None;
+
+                let mut filtered: Vec<Chain> = Vec::new();
+                for new_chain in flood_filled {
+                    // Case 1: There is already a free chain from capturing opponent chains
+                    if self.chains.iter().any(|c| {
+                        c.is_some()
+                            && c.as_ref()
+                                .unwrap()
+                                .positions
+                                .is_subset(&new_chain.positions)
+                    }) {
+                        continue;
+                    }
+
+                    // Case 2: The new chain covers multiple neighbors
+                    if filtered
+                        .iter()
+                        .any(|c| c.positions.is_subset(&new_chain.positions))
+                    {
+                        continue;
+                    }
+
+                    filtered.push(new_chain);
+                }
+
+                for mut new_chain in filtered {
+                    let id = self.chains.len();
+                    new_chain.id = id;
+                    for &p in new_chain.positions.iter() {
+                        change
+                            .mods
+                            .push(Mod::Assignment((p, self.pos_to_chain[p].unwrap())));
+                        self.pos_to_chain[p] = Some(id);
+                    }
+                    change.mods.push(Mod::Addition(id));
+                    self.chains.push(Some(new_chain));
+                }
+            } else if initial_free_neighbors.len() == 1 {
+                let new_chain = Board::floodfill(
+                    |t| self.get_tile(t),
+                    |n| self.neighbors(n),
+                    initial_free_neighbors[0],
+                    pos_id,
+                );
+
+                self.chains[pos_id] = Some(new_chain);
+            } else {
+                self.chains[pos_id] = None;
+            }
+        }
+
+        if action == Move::Pass
+            && self.history.len() > 0
+            && self.history.iter().last().unwrap().action == Move::Pass
+        {
+            self.turn = Turn::None;
+        } else {
+            self.turn = self.turn.next();
+        }
+
+        let hash = self.compute_board_hash();
+        if self.history.len() > 0
+            && self
+                .history
+                .iter()
+                .any(|c| c.action != Move::Pass && c.board_hash == hash)
+        {
+            self.rollback_change(change);
+            return Err("Repetition".to_string());
+        }
+        self.history.push(change);
+
+        Ok(())
+    }
+
+    pub fn undo_move(&mut self) -> Result<(), String> {
+        if let Some(change) = self.history.pop() {
+            self.rollback_change(change);
+            Ok(())
+        } else {
+            Err("No move to undo".to_string())
+        }
     }
 }

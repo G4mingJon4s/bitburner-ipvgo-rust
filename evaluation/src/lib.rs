@@ -1,22 +1,23 @@
+use board::{Board, Move, Tile, Turn};
 use rayon::prelude::*;
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, VecDeque},
+    fmt::Debug,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
-use board::{
-    util::{Chains, Move, Tile, Turn},
-    Board,
-};
-
 pub trait Heuristic: Send + Sync {
+    type Action: Debug + Copy;
+
     fn calculate_heuristic(&self) -> f32;
     fn is_terminal(&self) -> bool;
     fn is_maximizing(&self) -> bool;
     fn hash(&self) -> u64;
-    fn children(&self) -> impl Iterator<Item = Self>;
-    fn evaluate(&self, e: &Evaluator, depth: u8) -> (Duration, Vec<(Move, f32)>);
+    fn moves(&self) -> impl Iterator<Item = Self::Action>;
+    fn play(&mut self, mv: Self::Action) -> Result<(), String>;
+    fn undo(&mut self) -> Result<(), String>;
+    fn evaluate(&self, e: &Evaluator, depth: u8) -> (Duration, Vec<(Self::Action, f32)>);
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -102,21 +103,39 @@ impl Evaluator {
         self.table.clone().map_or(0, |t| t.lock().unwrap().len())
     }
 
-    pub fn evaluate<T: Heuristic>(&self, root: &T, depth: u8) -> f32 {
+    pub fn evaluate<T: Heuristic>(&self, root: &mut T, depth: u8) -> f32 {
         self.alpha_beta(root, depth, f32::NEG_INFINITY, f32::INFINITY)
     }
 
-    pub fn evaluate_all<T: Heuristic + Send + Sync>(&self, roots: Vec<T>, depth: u8) -> Vec<f32> {
-        let indexed = roots.iter().enumerate().collect::<Vec<_>>();
-        let mut unordered = indexed
-            .par_iter()
-            .map(|(i, b)| (*i, self.evaluate(*b, depth)))
+    pub fn evaluate_all<
+        A: Send + Sync,
+        T: Heuristic + Send + Sync,
+        F: Send + Sync + Fn(&A) -> Option<T>,
+    >(
+        &self,
+        roots: Vec<A>,
+        depth: u8,
+        key: F,
+    ) -> Vec<(A, f32)> {
+        let mut unordered = roots
+            .into_par_iter()
+            .filter_map(|a| {
+                let mut root = key(&a)?;
+                let result = self.evaluate(&mut root, depth);
+                Some((a, result))
+            })
             .collect::<Vec<_>>();
-        unordered.sort_by_key(|a| a.0);
-        unordered.iter().map(|(_, e)| *e).collect::<Vec<_>>()
+        unordered.sort_by(|a, b| b.1.total_cmp(&a.1));
+        unordered
     }
 
-    fn alpha_beta<T: Heuristic>(&self, node: &T, depth: u8, mut alpha: f32, mut beta: f32) -> f32 {
+    fn alpha_beta<T: Heuristic>(
+        &self,
+        node: &mut T,
+        depth: u8,
+        mut alpha: f32,
+        mut beta: f32,
+    ) -> f32 {
         let key = node.hash();
 
         if let Some(ref table) = self.table {
@@ -145,8 +164,14 @@ impl Evaluator {
             f32::INFINITY
         };
 
-        for child in node.children() {
-            let value = self.alpha_beta(&child, depth - 1, alpha, beta);
+        let moves = node.moves().collect::<Vec<_>>();
+        for mv in moves {
+            if node.play(mv).is_err() {
+                continue;
+            }
+
+            let value = self.alpha_beta(node, depth - 1, alpha, beta);
+            node.undo().unwrap();
             if node.is_maximizing() {
                 best_value = best_value.max(value);
                 alpha = alpha.max(best_value);
@@ -185,49 +210,37 @@ impl Evaluator {
 }
 
 impl Heuristic for Board {
+    type Action = Move;
+
     fn calculate_heuristic(&self) -> f32 {
         let mut score = -self.komi;
-        let mut seen = HashSet::new();
 
-        for pos in 0..(self.size as usize).pow(2) {
-            if seen.contains(&pos) {
-                continue;
-            }
-            let chain = self.get_chain(pos);
-            for &tile in &chain.tiles {
-                seen.insert(tile);
-            }
-
-            match chain.tile {
-                Tile::White => score -= chain.tiles.len() as f32,
-                Tile::Black => score += chain.tiles.len() as f32,
-                Tile::Dead => {} // dead stones are not scored
-                _ => {
-                    if let Some(adj_tile) = chain
-                        .adjacent
-                        .iter()
-                        .filter_map(|&p| {
-                            let t = self.tile(p);
-                            if t != Tile::Free && t != Tile::Dead {
-                                Some(t)
-                            } else {
-                                None
-                            }
-                        })
-                        .next()
-                    {
-                        if chain.adjacent.iter().all(|&p| {
-                            let t = self.tile(p);
-                            t == Tile::Dead || t == adj_tile
-                        }) {
-                            if adj_tile == Tile::White {
-                                score -= chain.tiles.len() as f32;
-                            } else {
-                                score += chain.tiles.len() as f32;
-                            }
-                        }
+        for c in self.chains.iter().filter_map(|a| a.as_ref()) {
+            if c.tile == Tile::Free {
+                let tile = c.adjacent.iter().find_map(|&a| match self.get_tile(a) {
+                    Tile::Dead => None,
+                    Tile::Free => None,
+                    a => Some(a),
+                });
+                if tile.is_some()
+                    && c.adjacent.iter().all(|&a| {
+                        let t = self.get_tile(a);
+                        t == Tile::Dead || t == tile.unwrap()
+                    })
+                {
+                    match tile.unwrap() {
+                        Tile::Black => score += c.positions.len() as f32,
+                        Tile::White => score -= c.positions.len() as f32,
+                        _ => panic!("not possible"),
                     }
                 }
+                continue;
+            }
+
+            match c.tile {
+                Tile::Black => score += c.positions.len() as f32,
+                Tile::White => score -= c.positions.len() as f32,
+                _ => panic!("not possible"),
             }
         }
 
@@ -243,26 +256,34 @@ impl Heuristic for Board {
     }
 
     fn hash(&self) -> u64 {
-        self.get_hash()
+        self.compute_board_hash()
     }
 
-    fn children(&self) -> impl Iterator<Item = Board> {
-        self.valid_moves().map(|(_, b)| b)
+    fn moves(&self) -> impl Iterator<Item = Self::Action> {
+        self.valid_moves()
     }
 
-    fn evaluate(&self, e: &Evaluator, depth: u8) -> (Duration, Vec<(Move, f32)>) {
+    fn play(&mut self, mv: Self::Action) -> Result<(), String> {
+        self.apply_move(mv)
+    }
+
+    fn undo(&mut self) -> Result<(), String> {
+        self.undo_move()
+    }
+
+    fn evaluate(&self, e: &Evaluator, depth: u8) -> (Duration, Vec<(Self::Action, f32)>) {
         let start = Instant::now();
         let moves = self.valid_moves().collect::<Vec<_>>();
 
-        let roots = moves.iter().map(|(_, b)| b.clone()).collect::<Vec<_>>();
-        let results = e.evaluate_all(roots, depth);
-        let data = moves
-            .iter()
-            .zip(results.iter())
-            .map(|(m, e)| (m.0, *e))
-            .collect::<Vec<_>>();
+        let results = e.evaluate_all(moves, depth, |&mv| {
+            let mut copy = self.clone();
+            match copy.apply_move(mv) {
+                Ok(_) => Some(copy),
+                Err(_) => None,
+            }
+        });
 
         let end = Instant::now();
-        (end - start, data)
+        (end - start, results)
     }
 }

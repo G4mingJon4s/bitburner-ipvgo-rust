@@ -1,8 +1,10 @@
-use board::{util::Move, Board};
+use std::env;
+
+use board::Move;
 use evaluation::Heuristic;
 use requests::{
     SessionBoardState, SessionCreateData, SessionEvaluationData, SessionIdentifier,
-    SessionListData, SessionMoveRequest, SessionMoveResponse,
+    SessionListData, SessionMoveRequest, SessionMoveResponse, SessionUndoResponse,
 };
 use rocket::{
     fairing::{Fairing, Info, Kind},
@@ -70,7 +72,7 @@ fn put_session_move(
     let mut session = store.get_session(&id).map_err(|_| Status::NotFound)?;
     let mv = data.into_inner().mv;
 
-    session.make_move(mv).map_err(|e| {
+    session.apply_move(mv).map_err(|e| {
         println!("Move provided is not valid: {}", e);
         Status::NotAcceptable
     })?;
@@ -80,6 +82,24 @@ fn put_session_move(
         mv,
         SessionBoardState::new(&session.board),
     )))
+}
+
+#[put("/session/<id>/undo")]
+fn put_session_undo(
+    id: usize,
+    store: &State<SessionStore>,
+) -> Result<Json<SessionUndoResponse>, Status> {
+    let mut session = store.get_session(&id).map_err(|_| Status::NotFound)?;
+
+    session.undo_move().map_err(|e| {
+        println!("Undo is not valid: {}", e);
+        Status::NotAcceptable
+    })?;
+    store.update_session(id, session.clone());
+
+    Ok(Json(SessionUndoResponse {
+        state: SessionBoardState::new(&session.board),
+    }))
 }
 
 #[get("/session/<id>/evaluation")]
@@ -104,27 +124,62 @@ async fn get_session_evaluation(
     };
 
     let duration = result.0;
-    let moves = result.1;
+    let moves = result
+        .1
+        .into_iter()
+        .map(|m| {
+            (
+                match m.0 {
+                    Move::Place(p) => Move::Coords(session.board.to_coords(p)),
+                    a => a,
+                },
+                m.1,
+            )
+        })
+        .collect::<Vec<_>>();
     session.evaluation_cache = Some((duration, moves.clone()));
 
-    let board = session.board.clone();
-    let mapped_eval = moves.iter().map(|(m, e)| {
-        (
-            match *m {
-                Move::Pos(a) => Move::Coords(Board::to_coords(a, board.size)),
-                a => a,
-            },
-            (&board).make_move(*m),
-            *e,
-        )
-    });
+    Ok(Json(SessionEvaluationData {
+        time: duration,
+        moves,
+    }))
+}
 
-    let mut eval: Vec<(Move, Board, f32)> = Vec::new();
-    for (m, b, e) in mapped_eval {
-        eval.push((m, b.map_err(|_| Status::InternalServerError)?, e));
+#[get("/session/<id>/error")]
+fn get_session_error(id: usize, store: &State<SessionStore>) -> Result<String, Status> {
+    let session = store.get_session(&id).map_err(|_| Status::NotFound)?;
+    let mut out = String::new();
+
+    let board = session.board;
+    out += format!("Requested error information:\n").as_str();
+    out += board
+        .get_rep()
+        .char_indices()
+        .fold(String::new(), |mut a, (i, c)| {
+            if i > 0 && (i % board.size as usize) == 0 {
+                a.push('\n');
+            }
+            a.push(c);
+            a
+        })
+        .as_str();
+    out.push('\n');
+    out.push('\n');
+    for (i, c) in board.chains.iter().enumerate() {
+        out += format!(" #{i}: {:?}\n", c).as_str();
     }
 
-    Ok(Json(SessionEvaluationData::new((duration, eval))))
+    out.push('\n');
+    for h in board.history.iter() {
+        out += format!("{:?}", h.action).as_str();
+    }
+
+    out.push('\n');
+    for (p, id) in board.pos_to_chain.iter().enumerate() {
+        out += format!("P{}: {:?}\n", p, id).as_str();
+    }
+
+    Ok(out)
 }
 
 #[post("/session", format = "json", data = "<data>")]
@@ -167,6 +222,8 @@ fn rocket() -> _ {
         .build_global()
         .unwrap();
 
+    env::set_var("RUST_BACKTRACE", "1");
+
     rocket::build()
         .manage(SessionStore::new())
         .attach(CORS)
@@ -180,7 +237,9 @@ fn rocket() -> _ {
                 get_session_list,
                 get_session_state,
                 get_session_evaluation,
+                get_session_error,
                 put_session_move,
+                put_session_undo,
             ],
         )
 }

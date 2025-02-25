@@ -1,11 +1,10 @@
 use std::time::Duration;
 
-use board::{
-    util::{Move, Turn},
-    Board, BoardData,
-};
+use board::{Board, Move, Turn};
 use evaluation::Heuristic;
 use rocket::serde::{Deserialize, Serialize};
+
+use crate::store::BoardData;
 
 #[derive(Serialize, Deserialize)]
 #[serde(crate = "rocket::serde")]
@@ -50,7 +49,7 @@ impl SessionBoardState {
             size: board.size,
             turn: board.turn,
             komi: board.komi,
-            rep: board.get_board_state(),
+            rep: board.get_rep(),
             current_score: board.calculate_heuristic(),
         }
     }
@@ -77,6 +76,12 @@ impl SessionMoveResponse {
 
 #[derive(Serialize, Deserialize)]
 #[serde(crate = "rocket::serde")]
+pub struct SessionUndoResponse {
+    pub state: SessionBoardState,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(crate = "rocket::serde")]
 pub struct SessionListData {
     pub sessions: Vec<usize>,
 }
@@ -85,18 +90,5 @@ pub struct SessionListData {
 #[serde(crate = "rocket::serde")]
 pub struct SessionEvaluationData {
     pub time: Duration,
-    pub moves: Vec<(Move, SessionBoardState, f32)>,
-}
-
-impl SessionEvaluationData {
-    pub fn new(data: (Duration, Vec<(Move, Board, f32)>)) -> Self {
-        Self {
-            time: data.0,
-            moves: data
-                .1
-                .iter()
-                .map(|(m, b, e)| (*m, SessionBoardState::new(b), *e))
-                .collect::<Vec<_>>(),
-        }
-    }
+    pub moves: Vec<(Move, f32)>,
 }

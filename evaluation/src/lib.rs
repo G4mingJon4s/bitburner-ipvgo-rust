@@ -1,10 +1,9 @@
-use board::{Board, Move, Tile, Turn};
 use rayon::prelude::*;
 use std::{
     collections::{HashMap, VecDeque},
     fmt::Debug,
     sync::{Arc, Mutex},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 pub trait Heuristic: Send + Sync {
@@ -13,7 +12,7 @@ pub trait Heuristic: Send + Sync {
     fn calculate_heuristic(&self) -> f32;
     fn is_terminal(&self) -> bool;
     fn is_maximizing(&self) -> bool;
-    fn hash(&self) -> u64;
+    fn get_hash(&self) -> u64;
     fn moves(&self) -> impl Iterator<Item = Self::Action>;
     fn play(&mut self, mv: Self::Action) -> Result<(), String>;
     fn undo(&mut self) -> Result<(), String>;
@@ -136,7 +135,7 @@ impl Evaluator {
         mut alpha: f32,
         mut beta: f32,
     ) -> f32 {
-        let key = node.hash();
+        let key = node.get_hash();
 
         if let Some(ref table) = self.table {
             if let Ok(mut table) = table.lock() {
@@ -206,84 +205,5 @@ impl Evaluator {
         }
 
         best_value
-    }
-}
-
-impl Heuristic for Board {
-    type Action = Move;
-
-    fn calculate_heuristic(&self) -> f32 {
-        let mut score = -self.komi;
-
-        for c in self.chains.iter().filter_map(|a| a.as_ref()) {
-            if c.tile == Tile::Free {
-                let tile = c.adjacent.iter().find_map(|&a| match self.get_tile(a) {
-                    Tile::Dead => None,
-                    Tile::Free => None,
-                    a => Some(a),
-                });
-                if tile.is_some()
-                    && c.adjacent.iter().all(|&a| {
-                        let t = self.get_tile(a);
-                        t == Tile::Dead || t == tile.unwrap()
-                    })
-                {
-                    match tile.unwrap() {
-                        Tile::Black => score += c.positions.len() as f32,
-                        Tile::White => score -= c.positions.len() as f32,
-                        _ => panic!("not possible"),
-                    }
-                }
-                continue;
-            }
-
-            match c.tile {
-                Tile::Black => score += c.positions.len() as f32,
-                Tile::White => score -= c.positions.len() as f32,
-                _ => panic!("not possible"),
-            }
-        }
-
-        score
-    }
-
-    fn is_terminal(&self) -> bool {
-        self.turn == Turn::None
-    }
-
-    fn is_maximizing(&self) -> bool {
-        self.turn == Turn::Black
-    }
-
-    fn hash(&self) -> u64 {
-        self.compute_board_hash()
-    }
-
-    fn moves(&self) -> impl Iterator<Item = Self::Action> {
-        self.valid_moves()
-    }
-
-    fn play(&mut self, mv: Self::Action) -> Result<(), String> {
-        self.apply_move(mv)
-    }
-
-    fn undo(&mut self) -> Result<(), String> {
-        self.undo_move()
-    }
-
-    fn evaluate(&self, e: &Evaluator, depth: u8) -> (Duration, Vec<(Self::Action, f32)>) {
-        let start = Instant::now();
-        let moves = self.valid_moves().collect::<Vec<_>>();
-
-        let results = e.evaluate_all(moves, depth, |&mv| {
-            let mut copy = self.clone();
-            match copy.apply_move(mv) {
-                Ok(_) => Some(copy),
-                Err(_) => None,
-            }
-        });
-
-        let end = Instant::now();
-        (end - start, results)
     }
 }

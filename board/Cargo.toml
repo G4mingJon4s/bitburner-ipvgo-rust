@@ -4,4 +4,5 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+evaluation = { path = "../evaluation" }
 serde = { version = "1.0.217", features = ["derive"] }

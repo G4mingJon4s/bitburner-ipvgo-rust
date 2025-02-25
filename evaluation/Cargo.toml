@@ -4,5 +4,4 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-board = { path = "../board" }
 rayon = "1.10.0"

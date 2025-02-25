@@ -1,8 +1,10 @@
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
+use std::time::{Duration, Instant};
 use std::usize;
 
+use evaluation::{Evaluator, Heuristic};
 use serde::{Deserialize, Serialize};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -273,43 +275,6 @@ impl Board {
         (0..(self.size as usize).pow(2))
             .map(|p| self.get_tile(p).to_char())
             .collect()
-    }
-
-    /// Might include moves that are a repetition
-    pub fn valid_moves(&self) -> impl Iterator<Item = Move> + '_ {
-        let mut possible_moves = vec![Move::Pass];
-
-        let friendly_color = self.turn.get_placing_color().unwrap();
-
-        for chain in self.chains.iter().filter_map(|a| a.as_ref()) {
-            if chain.tile != Tile::Free {
-                continue;
-            }
-            if chain.positions.len() >= 2 {
-                possible_moves.extend(chain.positions.iter().map(|&p| Move::Place(p)));
-                continue;
-            }
-
-            let &pos = chain.positions.iter().nth(0).unwrap();
-            let can_place = self
-                .neighbors(pos)
-                .iter()
-                .filter(|&&n| self.pos_to_chain[n].is_some())
-                .any(|&n| {
-                    let (_, n_chain) = self.get_chain(n).unwrap();
-                    if n_chain.tile == friendly_color && n_chain.liberties.len() >= 2 {
-                        return true;
-                    }
-                    n_chain.tile != friendly_color
-                        && n_chain.liberties.len() == 1
-                        && n_chain.liberties.contains(&pos)
-                });
-            if can_place {
-                possible_moves.push(Move::Place(pos));
-            }
-        }
-
-        possible_moves.into_iter()
     }
 
     fn rollback_change(&mut self, change: MoveChange) {
@@ -608,5 +573,116 @@ impl Board {
         } else {
             Err("No move to undo".to_string())
         }
+    }
+}
+
+impl Heuristic for Board {
+    type Action = Move;
+
+    fn calculate_heuristic(&self) -> f32 {
+        let mut score = -self.komi;
+
+        for c in self.chains.iter().filter_map(|a| a.as_ref()) {
+            if c.tile == Tile::Free {
+                let tile = c.adjacent.iter().find_map(|&a| match self.get_tile(a) {
+                    Tile::Dead => None,
+                    Tile::Free => None,
+                    a => Some(a),
+                });
+                if tile.is_some()
+                    && c.adjacent.iter().all(|&a| {
+                        let t = self.get_tile(a);
+                        t == Tile::Dead || t == tile.unwrap()
+                    })
+                {
+                    match tile.unwrap() {
+                        Tile::Black => score += c.positions.len() as f32,
+                        Tile::White => score -= c.positions.len() as f32,
+                        _ => panic!("not possible"),
+                    }
+                }
+                continue;
+            }
+
+            match c.tile {
+                Tile::Black => score += c.positions.len() as f32,
+                Tile::White => score -= c.positions.len() as f32,
+                _ => panic!("not possible"),
+            }
+        }
+
+        score
+    }
+
+    fn is_terminal(&self) -> bool {
+        self.turn == Turn::None
+    }
+
+    fn is_maximizing(&self) -> bool {
+        self.turn == Turn::Black
+    }
+
+    fn get_hash(&self) -> u64 {
+        self.compute_board_hash()
+    }
+
+    fn moves(&self) -> impl Iterator<Item = Self::Action> {
+        let mut possible_moves = vec![Move::Pass];
+
+        let friendly_color = self.turn.get_placing_color().unwrap();
+
+        for chain in self.chains.iter().filter_map(|a| a.as_ref()) {
+            if chain.tile != Tile::Free {
+                continue;
+            }
+            if chain.positions.len() >= 2 {
+                possible_moves.extend(chain.positions.iter().map(|&p| Move::Place(p)));
+                continue;
+            }
+
+            let &pos = chain.positions.iter().nth(0).unwrap();
+            let can_place = self
+                .neighbors(pos)
+                .iter()
+                .filter(|&&n| self.pos_to_chain[n].is_some())
+                .any(|&n| {
+                    let (_, n_chain) = self.get_chain(n).unwrap();
+                    if n_chain.tile == friendly_color && n_chain.liberties.len() >= 2 {
+                        return true;
+                    }
+                    n_chain.tile != friendly_color
+                        && n_chain.liberties.len() == 1
+                        && n_chain.liberties.contains(&pos)
+                });
+            if can_place {
+                possible_moves.push(Move::Place(pos));
+            }
+        }
+
+        possible_moves.into_iter()
+    }
+
+    fn play(&mut self, mv: Self::Action) -> Result<(), String> {
+        self.apply_move(mv)
+    }
+
+    fn undo(&mut self) -> Result<(), String> {
+        self.undo_move()
+    }
+
+    fn evaluate(&self, e: &Evaluator, depth: u8) -> (Duration, Vec<(Self::Action, f32)>) {
+        let start = Instant::now();
+        let moves = self.moves().collect::<Vec<_>>();
+
+        let results = e.evaluate_all(moves, depth, |&mv| {
+            let mut copy = self.clone();
+            match copy.apply_move(mv) {
+                Ok(_) => Some(copy),
+                Err(_) => None,
+            }
+        });
+
+        let end = Instant::now();
+        (end - start, results)
     }
 }

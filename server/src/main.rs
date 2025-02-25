@@ -1,7 +1,7 @@
 use std::env;
 
 use board::Move;
-use evaluation::Heuristic;
+use evaluation::Evaluator;
 use requests::{
     SessionBoardState, SessionCreateData, SessionEvaluationData, SessionIdentifier,
     SessionListData, SessionMoveRequest, SessionMoveResponse, SessionUndoResponse,
@@ -11,7 +11,7 @@ use rocket::{
     http::{Header, Method, Status},
     response::content::RawHtml,
     serde::json::Json,
-    tokio::task::spawn_blocking,
+    tokio::{task::spawn_blocking, time::Instant},
     Request, Response, State,
 };
 use store::SessionStore;
@@ -109,23 +109,27 @@ async fn get_session_evaluation(
 ) -> Result<Json<SessionEvaluationData>, Status> {
     let mut session = store.get_session(&id).map_err(|_| Status::NotFound)?;
 
+    if let Some(cache) = session.evaluation_cache {
+        return Ok(Json(SessionEvaluationData {
+            time: cache.0,
+            moves: cache.1,
+        }));
+    }
+
     let e = store.evaluator.clone();
-    let depth = store.depth;
+    let mut board = session.board.clone();
 
-    let board = session.board.clone();
-    let result = match session.evaluation_cache {
-        Some(cache) => cache,
-        None => spawn_blocking(move || {
-            let e = e.lock().unwrap();
-            board.evaluate(&e, depth)
-        })
-        .await
-        .map_err(|_| Status::InternalServerError)?,
-    };
+    let start = Instant::now();
+    let result = spawn_blocking(move || {
+        let e = e.lock().unwrap();
+        e.evaluate(&mut board)
+    })
+    .await
+    .map_err(|_| Status::InternalServerError)?;
+    let end = Instant::now();
 
-    let duration = result.0;
+    let duration = end - start;
     let moves = result
-        .1
         .into_iter()
         .map(|m| {
             (

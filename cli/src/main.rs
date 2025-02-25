@@ -2,13 +2,16 @@ use std::{
     env,
     io::stdin,
     thread::{self, available_parallelism},
-    time::Duration,
+    time::{Duration, Instant},
     usize,
 };
 
 use board::Board;
 use clap::Parser;
-use evaluation::{Evaluator, Heuristic, TranspositionTable};
+use evaluation::{
+    alphabeta::{AlphaBeta, CacheOption},
+    Evaluator, Heuristic,
+};
 use io::{Action, IO};
 
 mod io;
@@ -52,11 +55,13 @@ fn main() -> Result<(), String> {
         .expect("Thread pool error");
 
     let sin = stdin();
-    let evaluator = Evaluator::new(
-        !args.no_cache,
-        TranspositionTable::capacity_from_ram(1024 * 1024 * 500),
+    let evaluator = AlphaBeta::new(
+        depth,
+        match args.no_cache {
+            true => CacheOption::Disable,
+            false => CacheOption::Capacity(800_000_000),
+        },
     );
-
     let (rep, size, turn, komi) = IO::read_state(&sin)?;
 
     let mut board = Board::from_rep(rep, size, turn, komi)?;
@@ -64,8 +69,11 @@ fn main() -> Result<(), String> {
     while !board.is_terminal() {
         IO::print_result(&board);
 
-        let (time, move_evaluation) = board.evaluate(&evaluator, depth);
-        IO::print_move_evalutations(&board, move_evaluation, board.is_maximizing(), time);
+        let start = Instant::now();
+        let move_evaluation = evaluator.evaluate(&mut board);
+        let end = Instant::now();
+
+        IO::print_move_evalutations(&board, move_evaluation, board.is_maximizing(), end - start);
 
         let action = IO::read_action(&sin, &board);
         if let Err(e) = action {

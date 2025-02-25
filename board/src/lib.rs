@@ -1,10 +1,9 @@
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
-use std::time::{Duration, Instant};
 use std::usize;
 
-use evaluation::{Evaluator, Heuristic};
+use evaluation::Heuristic;
 use serde::{Deserialize, Serialize};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -668,21 +667,5 @@ impl Heuristic for Board {
 
     fn undo(&mut self) -> Result<(), String> {
         self.undo_move()
-    }
-
-    fn evaluate(&self, e: &Evaluator, depth: u8) -> (Duration, Vec<(Self::Action, f32)>) {
-        let start = Instant::now();
-        let moves = self.moves().collect::<Vec<_>>();
-
-        let results = e.evaluate_all(moves, depth, |&mv| {
-            let mut copy = self.clone();
-            match copy.apply_move(mv) {
-                Ok(_) => Some(copy),
-                Err(_) => None,
-            }
-        });
-
-        let end = Instant::now();
-        (end - start, results)
     }
 }

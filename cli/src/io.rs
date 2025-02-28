@@ -1,6 +1,7 @@
 use std::{io::Stdin, time::Duration};
 
 use board::{Board, Move, Turn};
+use evaluation::{alphabeta::AlphaBeta, montecarlo::MonteCarlo, AnyEvaluator};
 
 pub enum Action {
     Undo,
@@ -9,6 +10,48 @@ pub enum Action {
 
 pub struct IO;
 impl IO {
+    pub fn read_algorithm(stdin: &Stdin) -> Result<AnyEvaluator, String> {
+        println!("Please choose an algorithm (alpha-beta <depth> | monte-carlo <seconds>):");
+
+        let mut s = String::new();
+        stdin.read_line(&mut s).map_err(|e| e.to_string())?;
+        println!("");
+
+        let parts = s.trim().split_whitespace().collect::<Vec<&str>>();
+        if parts.len() == 0 {
+            return Err("No arguments given".to_string());
+        }
+
+        match parts[0].to_lowercase().trim() {
+            "alpha-beta" => Ok(AnyEvaluator::AlphaBeta(AlphaBeta::new(
+                {
+                    let p = parts.get(1).ok_or("No depth provided".to_string())?;
+                    p.parse::<u8>().map_err(|_| "Depth is invalid".to_string())
+                }?,
+                evaluation::alphabeta::CacheOption::Capacity(300_000_000),
+            ))),
+            "monte-carlo" => Ok(AnyEvaluator::MonteCarlo(MonteCarlo::new(
+                Duration::from_secs({
+                    let p = parts.get(1).ok_or("No time provided".to_string())?;
+                    p.parse().map_err(|_| "Time is invalid".to_string())
+                }?),
+            ))),
+            any => Err(format!("Invalid algorithm '{any}'")),
+        }
+    }
+
+    pub fn read_threads(stdin: &Stdin) -> Result<usize, String> {
+        println!("Please specify how many threads should be used:");
+
+        let mut s = String::new();
+        stdin.read_line(&mut s).map_err(|e| e.to_string())?;
+        println!("");
+
+        s.trim()
+            .parse::<usize>()
+            .map_err(|_| "Threads are invalid".to_string())
+    }
+
     pub fn read_state(stdin: &Stdin) -> Result<(String, u8, Turn, f32), String> {
         println!("Please input the starting state (rep;size;turn;komi):");
 

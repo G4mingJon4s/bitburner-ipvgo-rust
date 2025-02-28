@@ -6,7 +6,7 @@ use std::{
 };
 
 use board::{Board, Move, Turn};
-use evaluation::alphabeta::{AlphaBeta, CacheOption};
+use evaluation::AnyEvaluator;
 
 use crate::requests::SessionIdentifier;
 
@@ -58,17 +58,14 @@ impl Session {
 
 pub struct SessionStore {
     pub sessions: Mutex<HashMap<usize, Session>>,
-    pub evaluator: Arc<Mutex<AlphaBeta>>,
+    pub evaluator: Arc<Mutex<AnyEvaluator>>,
 }
 
 impl SessionStore {
-    pub fn new() -> Self {
+    pub fn new(evaluator: AnyEvaluator) -> Self {
         Self {
             sessions: Mutex::new(HashMap::new()),
-            evaluator: Arc::new(Mutex::new(AlphaBeta::new(
-                6,
-                CacheOption::Capacity(800_000_000),
-            ))),
+            evaluator: Arc::new(Mutex::new(evaluator)),
         }
     }
 

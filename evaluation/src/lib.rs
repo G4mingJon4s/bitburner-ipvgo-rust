@@ -1,6 +1,7 @@
 use std::fmt::Debug;
 
 pub mod alphabeta;
+pub mod montecarlo;
 
 pub trait Heuristic: Send + Sync + Clone {
     type Action: Debug + Copy + Send + Sync;
@@ -15,5 +16,27 @@ pub trait Heuristic: Send + Sync + Clone {
 }
 
 pub trait Evaluator {
-    fn evaluate<T: Heuristic>(&self, root: &mut T) -> Vec<(T::Action, f32)>;
+    fn evaluate<T: Heuristic>(&self, root: &mut T) -> Result<Vec<(T::Action, f32)>, String>;
+    fn is_multi_threaded(&self) -> bool;
+}
+
+pub enum AnyEvaluator {
+    AlphaBeta(alphabeta::AlphaBeta),
+    MonteCarlo(montecarlo::MonteCarlo),
+}
+
+impl Evaluator for AnyEvaluator {
+    fn evaluate<T: Heuristic>(&self, root: &mut T) -> Result<Vec<(T::Action, f32)>, String> {
+        match self {
+            &AnyEvaluator::AlphaBeta(ref a) => a.evaluate(root),
+            &AnyEvaluator::MonteCarlo(ref m) => m.evaluate(root),
+        }
+    }
+
+    fn is_multi_threaded(&self) -> bool {
+        match self {
+            &AnyEvaluator::AlphaBeta(ref a) => a.is_multi_threaded(),
+            &AnyEvaluator::MonteCarlo(ref m) => m.is_multi_threaded(),
+        }
+    }
 }

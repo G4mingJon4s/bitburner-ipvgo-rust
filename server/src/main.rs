@@ -1,7 +1,11 @@
-use std::env;
+use std::{env::args, time::Duration};
 
 use board::Move;
-use evaluation::Evaluator;
+use evaluation::{
+    alphabeta::{AlphaBeta, CacheOption},
+    montecarlo::MonteCarlo,
+    AnyEvaluator, Evaluator,
+};
 use requests::{
     SessionBoardState, SessionCreateData, SessionEvaluationData, SessionIdentifier,
     SessionListData, SessionMoveRequest, SessionMoveResponse, SessionUndoResponse,
@@ -130,6 +134,7 @@ async fn get_session_evaluation(
 
     let duration = end - start;
     let moves = result
+        .map_err(|_| Status::InternalServerError)?
         .into_iter()
         .map(|m| {
             (
@@ -221,15 +226,28 @@ fn not_found() -> RawHtml<&'static str> {
 
 #[launch]
 fn rocket() -> _ {
-    rayon::ThreadPoolBuilder::new()
-        .num_threads(4)
-        .build_global()
-        .unwrap();
+    let arg_list = args().collect::<Vec<_>>();
+    if arg_list.len() != 2 {
+        panic!("No algorithm provided. Got {:?}", arg_list);
+    }
 
-    env::set_var("RUST_BACKTRACE", "1");
+    let ev: AnyEvaluator = match arg_list[1].to_lowercase().trim() {
+        "alpha-beta" => {
+            AnyEvaluator::AlphaBeta(AlphaBeta::new(6, CacheOption::Capacity(300_000_000)))
+        }
+        "monte-carlo" => AnyEvaluator::MonteCarlo(MonteCarlo::new(Duration::from_secs(6))),
+        any => panic!("Invalid algorithm '{}'", any),
+    };
+
+    if ev.is_multi_threaded() {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(4)
+            .build_global()
+            .unwrap();
+    }
 
     rocket::build()
-        .manage(SessionStore::new())
+        .manage(SessionStore::new(ev))
         .attach(CORS)
         .register("/", catchers![not_found])
         .mount(

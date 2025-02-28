@@ -171,9 +171,9 @@ impl AlphaBeta {
 }
 
 impl Evaluator for AlphaBeta {
-    fn evaluate<T: Heuristic>(&self, root: &mut T) -> Vec<(T::Action, f32)> {
+    fn evaluate<T: Heuristic>(&self, root: &mut T) -> Result<Vec<(T::Action, f32)>, String> {
         let moves = root.moves().collect::<Vec<_>>();
-        moves
+        Ok(moves
             .into_par_iter()
             .filter_map(|m| {
                 let mut copy = root.clone();
@@ -181,6 +181,10 @@ impl Evaluator for AlphaBeta {
                 let eval = self.alpha_beta(&mut copy, self.depth, f32::MIN, f32::MAX);
                 Some((m, eval))
             })
-            .collect()
+            .collect())
+    }
+
+    fn is_multi_threaded(&self) -> bool {
+        true
     }
 }

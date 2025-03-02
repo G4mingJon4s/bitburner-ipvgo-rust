@@ -235,7 +235,7 @@ fn rocket() -> _ {
         "alpha-beta" => {
             AnyEvaluator::AlphaBeta(AlphaBeta::new(6, CacheOption::Capacity(300_000_000)))
         }
-        "monte-carlo" => AnyEvaluator::MonteCarlo(MonteCarlo::new(Duration::from_secs(6))),
+        "monte-carlo" => AnyEvaluator::MonteCarlo(MonteCarlo::new(Duration::from_secs(4))),
         any => panic!("Invalid algorithm '{}'", any),
     };
 

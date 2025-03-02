@@ -49,14 +49,14 @@ impl<T: Heuristic> Node<T> {
     }
 
     pub fn ucb1(&self, parent_visits: usize) -> f32 {
-        let exploration = ((parent_visits as f32).ln() / self.visits as f32).sqrt() * UCB1;
+        let exploration = (2.0 * (parent_visits as f32).ln() / self.visits as f32).sqrt() * UCB1;
         let signed_score = if self.maximizing {
-            self.total
-        } else {
             self.total * -1.0
+        } else {
+            self.total
         };
         let exploitation = signed_score / self.visits as f32;
-        let exploitation = 1.0 / (1.0 + (-exploitation).exp());
+        let exploitation = 1.0 / (1.0 + (-0.3 * exploitation).exp());
 
         if exploration.is_infinite() || exploitation.is_infinite() {
             return f32::MAX;

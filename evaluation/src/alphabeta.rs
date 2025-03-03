@@ -65,8 +65,6 @@ impl TranspositionTable {
     }
 }
 
-pub type SharedTable = Arc<Mutex<TranspositionTable>>;
-
 pub enum CacheOption {
     Capacity(usize),
     Disable,
@@ -74,7 +72,7 @@ pub enum CacheOption {
 
 pub struct AlphaBeta {
     depth: u8,
-    table: Option<SharedTable>,
+    table: Option<Arc<Mutex<TranspositionTable>>>,
 }
 
 impl AlphaBeta {
@@ -99,18 +97,19 @@ impl AlphaBeta {
     ) -> f32 {
         let key = node.get_hash();
 
-        if let Some(ref table) = self.table {
-            if let Ok(mut table) = table.lock() {
-                if let Some(entry) = table.get(key, depth) {
-                    match entry.bound {
-                        Bound::Exact => return entry.value,
-                        Bound::LowerBound => alpha = alpha.max(entry.value),
-                        Bound::UpperBound => beta = beta.max(entry.value),
-                    }
-                    if alpha >= beta {
-                        return entry.value;
-                    }
-                }
+        if let Some(entry) = self
+            .table
+            .as_ref()
+            .map(|t| t.lock().unwrap().get(key, depth))
+            .flatten()
+        {
+            match entry.bound {
+                Bound::Exact => return entry.value,
+                Bound::LowerBound => alpha = alpha.max(entry.value),
+                Bound::UpperBound => beta = beta.max(entry.value),
+            }
+            if alpha >= beta {
+                return entry.value;
             }
         }
 
@@ -153,17 +152,15 @@ impl AlphaBeta {
             Bound::Exact
         };
 
-        if let Some(ref table) = self.table {
-            if let Ok(mut table) = table.lock() {
-                table.insert(
-                    key,
-                    TranspositionEntry {
-                        depth,
-                        value: best_value,
-                        bound,
-                    },
-                );
-            }
+        if let Some(mut table) = self.table.as_ref().map(|t| t.lock().unwrap()) {
+            table.insert(
+                key,
+                TranspositionEntry {
+                    depth,
+                    value: best_value,
+                    bound,
+                },
+            );
         }
 
         best_value

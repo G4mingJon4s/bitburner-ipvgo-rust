@@ -227,15 +227,33 @@ fn not_found() -> RawHtml<&'static str> {
 #[launch]
 fn rocket() -> _ {
     let arg_list = args().collect::<Vec<_>>();
-    if arg_list.len() != 2 {
+    if arg_list.len() < 2 {
         panic!("No algorithm provided. Got {:?}", arg_list);
     }
 
-    let ev: AnyEvaluator = match arg_list[1].to_lowercase().trim() {
-        "alpha-beta" => {
-            AnyEvaluator::AlphaBeta(AlphaBeta::new(6, CacheOption::Capacity(300_000_000)))
+    let param: Option<usize> = if arg_list.len() == 3 {
+        let res = arg_list[2].parse::<usize>();
+
+        if res.is_err() {
+            println!(
+                "Param for algorithm '{}' is not valid, using default!",
+                arg_list[1].to_lowercase().trim()
+            );
         }
-        "monte-carlo" => AnyEvaluator::MonteCarlo(MonteCarlo::new(Duration::from_secs(4))),
+
+        res.ok()
+    } else {
+        None
+    };
+
+    let ev: AnyEvaluator = match arg_list[1].to_lowercase().trim() {
+        "alpha-beta" => AnyEvaluator::AlphaBeta(AlphaBeta::new(
+            6,
+            CacheOption::Capacity(param.unwrap_or(300_000_000)),
+        )),
+        "monte-carlo" => AnyEvaluator::MonteCarlo(MonteCarlo::new(Duration::from_secs(
+            param.unwrap_or(4) as u64,
+        ))),
         any => panic!("Invalid algorithm '{}'", any),
     };
 

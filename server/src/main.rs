@@ -261,7 +261,9 @@ fn rocket() -> _ {
         .build_global()
         .unwrap();
 
-    let cfg = Figment::from(rocket::Config::default()).merge(("log_level", "off"));
+    let cfg = Figment::from(rocket::Config::default())
+        .merge(("log_level", "off"))
+        .merge(("port", 5151));
     rocket::custom(cfg)
         .manage(SessionStore::new(session_fn))
         .attach(CORS)

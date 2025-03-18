@@ -4,7 +4,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use crate::{Evaluator, Heuristic};
+use crate::{EvaluationSession, Evaluator, Heuristic};
 
 #[derive(Clone, Copy, Debug)]
 pub enum Bound {
@@ -70,6 +70,7 @@ pub enum CacheOption {
     Disable,
 }
 
+#[derive(Clone)]
 pub struct AlphaBeta {
     depth: u8,
     table: Option<Arc<Mutex<TranspositionTable>>>,
@@ -183,5 +184,42 @@ impl Evaluator for AlphaBeta {
 
     fn is_multi_threaded(&self) -> bool {
         true
+    }
+}
+
+#[derive(Clone)]
+pub struct AlphaBetaSession<T: Heuristic> {
+    pub root: T,
+    evaluator: AlphaBeta,
+}
+
+impl<T: Heuristic> AlphaBetaSession<T> {
+    pub fn new(root: T, depth: u8, cache: CacheOption) -> Self {
+        Self {
+            root,
+            evaluator: AlphaBeta::new(depth, cache),
+        }
+    }
+}
+
+impl<T: Heuristic> EvaluationSession<T> for AlphaBetaSession<T> {
+    fn apply_move(&mut self, mv: <T as Heuristic>::Action) -> Result<(), String> {
+        self.root.play(mv)
+    }
+
+    fn undo_move(&mut self) -> Result<(), String> {
+        self.root.undo()
+    }
+
+    fn evaluate(&mut self) -> Result<Vec<(<T as Heuristic>::Action, f32)>, String> {
+        self.evaluator.evaluate(&mut self.root)
+    }
+
+    fn is_multi_threaded(&self) -> bool {
+        self.evaluator.is_multi_threaded()
+    }
+
+    fn get_root(&self) -> &T {
+        &self.root
     }
 }

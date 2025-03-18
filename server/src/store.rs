@@ -1,12 +1,12 @@
 use std::{
     collections::HashMap,
     ops::AddAssign,
-    sync::{Arc, LazyLock, Mutex},
+    sync::{LazyLock, Mutex},
     time::Duration,
 };
 
 use board::{Board, Move, Turn};
-use evaluation::AnyEvaluator;
+use evaluation::{AnyEvaluationSession, EvaluationSession};
 
 use crate::requests::SessionIdentifier;
 
@@ -15,8 +15,14 @@ static CURRENT_ID: LazyLock<Mutex<usize>> = LazyLock::new(|| Mutex::new(0));
 #[derive(Clone)]
 pub struct Session {
     pub session_id: usize,
-    pub board: Board,
     pub evaluation_cache: Option<(Duration, Vec<(Move, f32)>)>,
+    pub evaluation_session: AnyEvaluationSession<Board>,
+}
+
+impl Session {
+    pub fn board(&self) -> &Board {
+        &self.evaluation_session.get_root()
+    }
 }
 
 pub struct BoardData {
@@ -27,7 +33,10 @@ pub struct BoardData {
 }
 
 impl Session {
-    pub fn new(data: &BoardData) -> Result<Self, String> {
+    pub fn new(
+        data: &BoardData,
+        session_fn: impl Fn(Board) -> AnyEvaluationSession<Board>,
+    ) -> Result<Self, String> {
         let mut handle = CURRENT_ID.lock().unwrap();
         handle.add_assign(1);
         let id = handle.clone();
@@ -36,21 +45,21 @@ impl Session {
 
         Ok(Self {
             session_id: id,
-            board,
             evaluation_cache: None,
+            evaluation_session: session_fn(board),
         })
     }
 }
 
 impl Session {
     pub fn apply_move(&mut self, mv: Move) -> Result<(), String> {
-        self.board.apply_move(mv)?;
+        self.evaluation_session.apply_move(mv)?;
         self.evaluation_cache = None;
         Ok(())
     }
 
     pub fn undo_move(&mut self) -> Result<(), String> {
-        self.board.undo_move()?;
+        self.evaluation_session.undo_move()?;
         self.evaluation_cache = None;
         Ok(())
     }
@@ -58,14 +67,16 @@ impl Session {
 
 pub struct SessionStore {
     pub sessions: Mutex<HashMap<usize, Session>>,
-    pub evaluator: Arc<Mutex<AnyEvaluator>>,
+    pub session_fn: Box<dyn Send + Sync + 'static + Fn(Board) -> AnyEvaluationSession<Board>>,
 }
 
 impl SessionStore {
-    pub fn new(evaluator: AnyEvaluator) -> Self {
+    pub fn new(
+        session_fn: impl Send + Sync + 'static + Fn(Board) -> AnyEvaluationSession<Board>,
+    ) -> Self {
         Self {
             sessions: Mutex::new(HashMap::new()),
-            evaluator: Arc::new(Mutex::new(evaluator)),
+            session_fn: Box::new(session_fn),
         }
     }
 
@@ -84,7 +95,7 @@ impl SessionStore {
     }
 
     pub fn create_new_session(&self, data: &BoardData) -> Result<SessionIdentifier, String> {
-        let session = Session::new(data)?;
+        let session = Session::new(data, self.session_fn.as_ref())?;
         let id = session.session_id;
 
         let mut handle = self.sessions.lock().unwrap();

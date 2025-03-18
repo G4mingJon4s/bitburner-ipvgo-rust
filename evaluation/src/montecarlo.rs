@@ -6,10 +6,11 @@ use rand::{
     seq::{IndexedRandom, IteratorRandom},
 };
 
-use crate::{Evaluator, Heuristic};
+use crate::{EvaluationSession, Evaluator, Heuristic};
 
 const UCB1: f32 = 1.1;
 
+#[derive(Clone)]
 struct Node<T: Heuristic> {
     pub children: Option<Vec<(T::Action, Node<T>)>>,
     pub maximizing: bool,
@@ -176,5 +177,78 @@ impl Evaluator for MonteCarlo {
 
     fn is_multi_threaded(&self) -> bool {
         false
+    }
+}
+
+#[derive(Clone)]
+pub struct MonteCarloSession<T: Heuristic> {
+    node: Node<T>,
+
+    pub root: T,
+    pub time: Duration,
+}
+
+impl<T: Heuristic> MonteCarloSession<T> {
+    pub fn new(root: T, time: Duration) -> Self {
+        Self {
+            time,
+            node: Node::new(root.is_maximizing()),
+            root,
+        }
+    }
+}
+
+impl<T: Heuristic> EvaluationSession<T> for MonteCarloSession<T> {
+    fn is_multi_threaded(&self) -> bool {
+        false
+    }
+
+    fn apply_move(&mut self, mv: T::Action) -> Result<(), String> {
+        self.root.play(mv)?;
+
+        if self.node.children.is_none() {
+            self.node = Node::new(self.root.is_maximizing());
+            return Ok(());
+        }
+
+        let children = self.node.children.take().unwrap();
+
+        let new_node = children
+            .into_iter()
+            .find(|a| a.0 == mv)
+            .ok_or("move not in children".to_string())?;
+        self.node = new_node.1;
+
+        Ok(())
+    }
+
+    fn undo_move(&mut self) -> Result<(), String> {
+        self.root.undo()?;
+        self.node = Node::new(self.root.is_maximizing());
+
+        Ok(())
+    }
+
+    fn evaluate(&mut self) -> Result<Vec<(<T as Heuristic>::Action, f32)>, String> {
+        let start = Instant::now();
+        while Instant::now() - start < self.time {
+            self.node.backpropagate(&mut self.root);
+        }
+
+        Ok(self
+            .node
+            .children
+            .as_ref()
+            .unwrap()
+            .into_iter()
+            .map(|(m, n)| {
+                let sign = if self.node.maximizing { 1.0 } else { -1.0 };
+                (*m, sign * n.visits as f32)
+            })
+            .collect())
+    }
+
+    fn get_root(&self) -> &T {
+        &self.root
     }
 }

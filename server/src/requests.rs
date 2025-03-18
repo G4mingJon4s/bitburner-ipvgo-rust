@@ -1,7 +1,6 @@
 use std::time::Duration;
 
 use board::{Board, Move, Turn};
-use evaluation::Heuristic;
 use rocket::serde::{Deserialize, Serialize};
 
 use crate::store::BoardData;
@@ -40,7 +39,6 @@ pub struct SessionBoardState {
     pub rep: String,
 
     pub komi: f32,
-    pub current_score: f32,
 }
 
 impl SessionBoardState {
@@ -50,7 +48,6 @@ impl SessionBoardState {
             turn: board.turn,
             komi: board.komi,
             rep: board.get_rep(),
-            current_score: board.calculate_heuristic(),
         }
     }
 }

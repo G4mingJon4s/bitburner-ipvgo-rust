@@ -1,10 +1,10 @@
 use std::{env::args, time::Duration};
 
-use board::Move;
+use board::{Board, Move};
 use evaluation::{
-    alphabeta::{AlphaBeta, CacheOption},
-    montecarlo::MonteCarlo,
-    AnyEvaluator, Evaluator,
+    alphabeta::{AlphaBetaSession, CacheOption},
+    montecarlo::MonteCarloSession,
+    AnyEvaluationSession, EvaluationSession,
 };
 use requests::{
     SessionBoardState, SessionCreateData, SessionEvaluationData, SessionIdentifier,
@@ -12,6 +12,7 @@ use requests::{
 };
 use rocket::{
     fairing::{Fairing, Info, Kind},
+    figment::Figment,
     http::{Header, Method, Status},
     response::content::RawHtml,
     serde::json::Json,
@@ -64,7 +65,7 @@ fn get_session_state(
     store: &State<SessionStore>,
 ) -> Result<Json<SessionBoardState>, Status> {
     let session = store.get_session(&id).map_err(|_| Status::NotFound)?;
-    Ok(Json(SessionBoardState::new(&session.board)))
+    Ok(Json(SessionBoardState::new(&session.board())))
 }
 
 #[put("/session/<id>/move", format = "json", data = "<data>")]
@@ -84,7 +85,7 @@ fn put_session_move(
 
     Ok(Json(SessionMoveResponse::new(
         mv,
-        SessionBoardState::new(&session.board),
+        SessionBoardState::new(&session.board()),
     )))
 }
 
@@ -102,7 +103,7 @@ fn put_session_undo(
     store.update_session(id, session.clone());
 
     Ok(Json(SessionUndoResponse {
-        state: SessionBoardState::new(&session.board),
+        state: SessionBoardState::new(&session.board()),
     }))
 }
 
@@ -112,6 +113,7 @@ async fn get_session_evaluation(
     store: &State<SessionStore>,
 ) -> Result<Json<SessionEvaluationData>, Status> {
     let mut session = store.get_session(&id).map_err(|_| Status::NotFound)?;
+    let board = session.board().clone();
 
     if let Some(cache) = session.evaluation_cache {
         return Ok(Json(SessionEvaluationData {
@@ -120,26 +122,19 @@ async fn get_session_evaluation(
         }));
     }
 
-    let e = store.evaluator.clone();
-    let mut board = session.board.clone();
-
     let start = Instant::now();
-    let result = spawn_blocking(move || {
-        let e = e.lock().unwrap();
-        e.evaluate(&mut board)
-    })
-    .await
-    .map_err(|_| Status::InternalServerError)?;
-    let end = Instant::now();
+    let result = spawn_blocking(move || session.evaluation_session.evaluate())
+        .await
+        .map_err(|_| Status::InternalServerError)?;
+    let duration = Instant::now() - start;
 
-    let duration = end - start;
     let moves = result
         .map_err(|_| Status::InternalServerError)?
         .into_iter()
         .map(|m| {
             (
                 match m.0 {
-                    Move::Place(p) => Move::Coords(session.board.to_coords(p)),
+                    Move::Place(p) => Move::Coords(board.to_coords(p)),
                     a => a,
                 },
                 m.1,
@@ -159,7 +154,7 @@ fn get_session_error(id: usize, store: &State<SessionStore>) -> Result<String, S
     let session = store.get_session(&id).map_err(|_| Status::NotFound)?;
     let mut out = String::new();
 
-    let board = session.board;
+    let board = session.board();
     out += format!("Requested error information:\n").as_str();
     out += board
         .get_rep()
@@ -246,26 +241,29 @@ fn rocket() -> _ {
         None
     };
 
-    let ev: AnyEvaluator = match arg_list[1].to_lowercase().trim() {
-        "alpha-beta" => AnyEvaluator::AlphaBeta(AlphaBeta::new(
-            6,
-            CacheOption::Capacity(param.unwrap_or(300_000_000)),
-        )),
-        "monte-carlo" => AnyEvaluator::MonteCarlo(MonteCarlo::new(Duration::from_secs(
-            param.unwrap_or(4) as u64,
-        ))),
-        any => panic!("Invalid algorithm '{}'", any),
+    let session_fn = move |b: Board| -> AnyEvaluationSession<Board> {
+        match arg_list[1].to_lowercase().trim() {
+            "alpha-beta" => AnyEvaluationSession::AlphaBeta(AlphaBetaSession::new(
+                b,
+                param.unwrap_or(6) as u8,
+                CacheOption::Capacity(300_000_000),
+            )),
+            "monte-carlo" => AnyEvaluationSession::MonteCarlo(MonteCarloSession::new(
+                b,
+                Duration::from_secs(param.unwrap_or(4) as u64),
+            )),
+            any => panic!("Invalid algorithm '{}'", any),
+        }
     };
 
-    if ev.is_multi_threaded() {
-        rayon::ThreadPoolBuilder::new()
-            .num_threads(4)
-            .build_global()
-            .unwrap();
-    }
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(4)
+        .build_global()
+        .unwrap();
 
-    rocket::build()
-        .manage(SessionStore::new(ev))
+    let cfg = Figment::from(rocket::Config::default()).merge(("log_level", "off"));
+    rocket::custom(cfg)
+        .manage(SessionStore::new(session_fn))
         .attach(CORS)
         .register("/", catchers![not_found])
         .mount(

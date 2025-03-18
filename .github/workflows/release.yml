@@ -1,0 +1,36 @@
+name: Release
+
+on:
+  push:
+    branches: [ "master" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - targets: x86_64-pc-windows-msvc
+            os: windows-latest
+            ext: .exe
+          - targets: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            ext: ""
+        targets: [x86_64-pc-windows-msvc, x86_64-unknown-linux-gnu]
+        packages: [cli, server]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install dependencies
+      run: rustup target add ${{ matrix.targets }}
+    - name: Build
+      run: cargo build --release --target ${{ matrix.targets }} --package ${{ matrix.packages }}
+    - name: Upload
+      uses: actions/upload-artifact@v4
+      with:
+        name: target-${{ matrix.targets }}-${{ matrix.packages }}
+        path: target/${{ matrix.targets }}/release/${{ matrix.packages }}${{ matrix.ext }}
